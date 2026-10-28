@@ -47,16 +47,17 @@ Modules: `pol/api.py` (Meta client), `pol/prompts.py`, `pol/photos.py`, `pol/mer
 ## Findings so far
 
 * First live SAM run on `tv.jpg` (Oct 28): television 0.96, soundbar 0.86, lamp 0.69 (partly out of frame), couch 0 (correct negative), tv stand 0.79 correct plus a false 0.58 "tv stand" that was the TV's own pedestal foot; "side table" missed the side table. Led to category synonyms and the Muse Spark verify step.
+* Full pipeline on `tv.jpg` (Oct 28, all 20 phrasings, then `--describe`): `muse-spark-1.1` works as the model id, so no `MUSE_MODEL` needed. Muse Spark named all 4 kept items (TV, soundbar, barn-door TV stand, floor lamp) and the reject rule dropped the 0.58 pedestal foot ("black plastic TV leg", not standalone). "speaker" 0.53 hit the soundbar's exact box and collapsed into it. Side table still missed by "side table", "end table" and "nightstand". The lamp crop is 36 px wide, yet Muse described it in detail; treat descriptions of tiny crops as weak.
+* Cost per photo, about $0.08: SAM 3.1 is 20 calls, one image each (about $0.05 at a reported $2.50 per 1,000 images); Muse Spark is 5 calls, 3,240 input tokens (2,927 cached) and 6,273 output (about $0.03 at $1.25 / $0.15 cached / $4.25 per M). 94% of Muse output is reasoning tokens. Prices are from press reports, not Meta's pricing page; confirm in the dashboard. `pol/api.py respond()` discards the `usage` block, so cost is not logged by the pipeline itself.
 * Fixed-bin color histograms split the same couch under 7% dimming; replaced with chromaticity plus tolerant luminance.
 * Images sent through chat apps lose EXIF dates; use originals from the phone or Google Photos.
 
 ## Open items, in order
 
-1. Run `test_sam.py` on `tv.jpg` with all phrasings, then `build_schedule.py --describe`. Confirm the Muse Spark model id works (`muse-spark-1.1` from LiteLLM docs; if 404, find the id in the Meta dashboard model list and set `MUSE_MODEL`). Record cost per photo.
-2. Real test set: 40 to 60 original photos across Jason's homes; hand-label items for an honest found/missed/wrong-merge evaluation.
-3. Walkthrough video: SAM 3.1 video tracking, plus Muse Voice Transcribe on narration to fill purchase details.
-4. UI: photo grid, item cards with proof crops side by side, inventory table with totals, CSV export.
-5. Demo video script and recording; README results section; submission text; X post.
+1. Real test set: 40 to 60 original photos across Jason's homes; hand-label items for an honest found/missed/wrong-merge evaluation.
+2. Walkthrough video: SAM 3.1 video tracking, plus Muse Voice Transcribe on narration to fill purchase details.
+3. UI: photo grid, item cards with proof crops side by side, inventory table with totals, CSV export.
+4. Demo video script and recording; README results section; submission text; X post.
 
 ## Writing style for anything Jason reads or publishes
 
