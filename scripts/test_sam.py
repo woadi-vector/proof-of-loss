@@ -1,8 +1,8 @@
 """First contact with SAM 3.1: segment household items in one old photo.
 
 Usage (from the repo folder):
-    python scripts/test_sam.py "C:\\path\\to\\photo.jpg"
-    python scripts/test_sam.py photo.jpg --prompts "couch" "television" "lamp"
+    python scripts/test_sam.py "C:\\path\\to\\photo.jpg"          (every category in pol/prompts.py)
+    python scripts/test_sam.py photo.jpg --prompts "end table" "lamp"
 
 Writes everything to runs/<timestamp>_<photo>/:
     raw_<prompt>.txt      every server event, verbatim, for debugging
@@ -21,46 +21,16 @@ import time
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from meta_sam_parser import CompletedOutcome, image_segmentation_format
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pol.api import load_key, upload  # noqa: E402
+from pol.prompts import all_prompts, category_for  # noqa: E402
 
 API = "https://api.meta.ai/v1"
 ROOT = Path(__file__).resolve().parent.parent
 
-# Things a contents claim actually lists. Short noun phrases, one object each,
-# as the SAM docs recommend.
-DEFAULT_PROMPTS = [
-    "couch", "television", "lamp", "chair", "table",
-    "rug", "picture frame", "bookshelf", "bed", "speaker",
-]
-
-
-def load_key() -> str:
-    env = ROOT / ".env"
-    if not env.exists():
-        sys.exit(f"No .env file at {env}. Copy .env.example to .env and add your key.")
-    for line in env.read_text(encoding="utf-8").splitlines():
-        if line.strip().startswith("MODEL_API_KEY="):
-            key = line.split("=", 1)[1].strip().strip('"').strip("'")
-            if key:
-                return key
-    sys.exit("MODEL_API_KEY is empty in .env")
-
-
-def upload(path: Path, key: str) -> str:
-    with path.open("rb") as fh:
-        r = requests.post(
-            f"{API}/files",
-            headers={"Authorization": f"Bearer {key}"},
-            data={"purpose": "user_data",
-                  "expires_after[anchor]": "created_at",
-                  "expires_after[seconds]": "3600"},
-            files={"file": (path.name, fh)},
-            timeout=120,
-        )
-    if r.status_code >= 400:
-        sys.exit(f"Upload failed ({r.status_code}): {r.text[:500]}")
-    return r.json()["id"]
 
 
 def segment(file_id: str, prompt: str, key: str, raw_log: Path) -> str:
@@ -124,7 +94,7 @@ def parse_boxes(text: str) -> list:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("photo")
-    ap.add_argument("--prompts", nargs="+", default=DEFAULT_PROMPTS)
+    ap.add_argument("--prompts", nargs="+", help="override the category phrasings in pol/prompts.py")
     args = ap.parse_args()
 
     photo = Path(args.photo)
@@ -139,8 +109,9 @@ def main() -> None:
     file_id = upload(photo, key)
     print(f"  file id {file_id}")
 
+    pairs = [(category_for(p), p) for p in args.prompts] if args.prompts else all_prompts()
     items = []
-    for prompt in args.prompts:
+    for category, prompt in pairs:
         t0 = time.time()
         try:
             text = segment(file_id, prompt, key, out / f"raw_{prompt.replace(' ', '_')}.txt")
@@ -151,7 +122,8 @@ def main() -> None:
         conf = [round(b.confidence, 2) for b in boxes if b.confidence is not None]
         print(f"  {prompt:15s} {len(boxes)} found  conf {conf}  ({time.time() - t0:.1f}s)")
         for b in boxes:
-            items.append({"photo": str(photo.resolve()), "prompt": prompt, "object_id": b.object_id,
+            items.append({"photo": str(photo.resolve()), "category": category, "prompt": prompt,
+                          "object_id": b.object_id,
                           "box": [b.left, b.top, b.right, b.bottom],
                           "confidence": b.confidence})
 
@@ -159,11 +131,16 @@ def main() -> None:
 
     img = Image.open(photo).convert("RGB")
     draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.load_default(size=max(18, img.width // 45))
+    except TypeError:          # Pillow older than 10.1
+        font = ImageFont.load_default()
     for it in items:
         x1, y1, x2, y2 = it["box"]
         draw.rectangle([x1, y1, x2, y2], outline=(255, 64, 64), width=4)
         label = it["prompt"] + (f" {it['confidence']:.2f}" if it["confidence"] is not None else "")
-        draw.text((x1 + 6, y1 + 6), label, fill=(255, 255, 0))
+        draw.text((x1 + 6, y1 + 6), label, fill=(255, 255, 0), font=font,
+                  stroke_width=2, stroke_fill=(0, 0, 0))
     img.save(out / "overlay.jpg", quality=90)
 
     print(f"\n{len(items)} items total. Results in {out}")

@@ -146,9 +146,20 @@ def test_no_evidence_no_line():
     print("  evidence rule ok: item without a crop produced no line")
 
 
+def test_reject_rule():
+    from pol.describe import Verdict, should_reject
+    foot = Verdict(False, False, "television pedestal foot", "", "", "unclear", "")
+    stand = Verdict(True, True, "barn-door TV stand", "", "", "good", "")
+    assert should_reject(0.58, foot), "weak detection the model disowns is dropped"
+    assert not should_reject(0.79, foot), "a confident detection is never dropped on the model's word alone"
+    assert not should_reject(0.58, stand), "a weak detection the model confirms is kept"
+    print("  reject rule ok: only weak AND disowned detections are dropped")
+
+
 if __name__ == "__main__":
     items = test_merge()
     test_judge_unsure_stays_separate()
     test_schedule(items)
     test_no_evidence_no_line()
+    test_reject_rule()
     print("all passed")
