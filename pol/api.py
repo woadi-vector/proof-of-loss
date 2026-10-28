@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import requests
@@ -14,6 +15,17 @@ ROOT = Path(__file__).resolve().parent.parent
 # The model id the LiteLLM provider docs list for Muse Spark. If Meta's model
 # list names a newer one, set MUSE_MODEL in .env.
 DEFAULT_MUSE_MODEL = "muse-spark-1.1"
+
+# Every Responses call appends one line here, so cost per photo comes from
+# the pipeline itself. runs/ is gitignored.
+USAGE_LOG = ROOT / "runs" / "usage.jsonl"
+
+# US dollars. From press reports (Oct 2026), not Meta's pricing page: check the
+# dashboard before quoting. Muse Spark per million tokens; SAM per image.
+PRICES = {
+    "muse-spark-1.1": {"input": 1.25, "cached_input": 0.15, "output": 4.25},
+    "sam-3.1": {"image": 0.0025},
+}
 
 
 def _env() -> dict[str, str]:
@@ -68,7 +80,30 @@ def response_text(body: dict) -> str:
     return "".join(parts)
 
 
-def respond(key: str, model: str, content: list[dict], timeout: int = 120) -> str:
+def call_cost(model: str, usage: dict | None) -> float | None:
+    """Dollar cost of one call from its usage block; None if the model is not priced."""
+    p = PRICES.get(model)
+    if not p or not usage:
+        return None
+    if "image" in p:
+        return usage.get("images_processed", 0) * p["image"]
+    cached = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
+    fresh = usage.get("input_tokens", 0) - cached
+    return (fresh * p["input"] + cached * p["cached_input"] + usage.get("output_tokens", 0) * p["output"]) / 1e6
+
+
+def log_usage(model: str, usage: dict | None, photo: str | None = None, log: Path = USAGE_LOG) -> None:
+    """Record one call. `photo` is the source photo the call was about, for cost per photo."""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    rec = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "model": model,
+           "photo": Path(photo).name if photo else None, "usage": usage,
+           "cost": call_cost(model, usage)}
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+def respond(key: str, model: str, content: list[dict], timeout: int = 120,
+            photo: str | None = None) -> str:
     r = requests.post(
         f"{API}/responses",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -77,7 +112,9 @@ def respond(key: str, model: str, content: list[dict], timeout: int = 120) -> st
     )
     if r.status_code >= 400:
         raise RuntimeError(f"HTTP {r.status_code}: {r.text[:500]}")
-    return response_text(r.json())
+    body = r.json()
+    log_usage(model, body.get("usage"), photo)
+    return response_text(body)
 
 
 def parse_json_reply(text: str) -> dict:

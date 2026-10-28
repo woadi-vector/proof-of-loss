@@ -25,7 +25,7 @@ from PIL import Image, ImageDraw, ImageFont
 from meta_sam_parser import CompletedOutcome, image_segmentation_format
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pol.api import load_key, upload  # noqa: E402
+from pol.api import load_key, log_usage, upload  # noqa: E402
 from pol.prompts import all_prompts, category_for  # noqa: E402
 
 API = "https://api.meta.ai/v1"
@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 
-def segment(file_id: str, prompt: str, key: str, raw_log: Path) -> str:
+def segment(file_id: str, prompt: str, key: str, raw_log: Path, photo: Path | None = None) -> str:
     """Stream one SAM request; return the concatenated output text."""
     body = {
         "model": "sam-3.1",
@@ -58,6 +58,7 @@ def segment(file_id: str, prompt: str, key: str, raw_log: Path) -> str:
 
     deltas: list[str] = []
     final_text: str | None = None
+    usage: dict | None = None
     with raw_log.open("w", encoding="utf-8") as log:
         for line in r.iter_lines(decode_unicode=True):
             if not line:
@@ -79,8 +80,11 @@ def segment(file_id: str, prompt: str, key: str, raw_log: Path) -> str:
                 part = ev.get("part") or {}
                 if part.get("type") == "output_text":
                     final_text = part.get("text", "")
+            elif t == "response.completed":
+                usage = (ev.get("response") or {}).get("usage")
             elif t in ("response.failed", "error"):
                 raise RuntimeError(f"{prompt}: server reported {t}: {json.dumps(ev)[:400]}")
+    log_usage("sam-3.1", usage, str(photo) if photo else None)
     return final_text if final_text is not None else "".join(deltas)
 
 
@@ -114,7 +118,7 @@ def main() -> None:
     for category, prompt in pairs:
         t0 = time.time()
         try:
-            text = segment(file_id, prompt, key, out / f"raw_{prompt.replace(' ', '_')}.txt")
+            text = segment(file_id, prompt, key, out / f"raw_{prompt.replace(' ', '_')}.txt", photo)
             boxes = parse_boxes(text)
         except Exception as exc:  # keep going; one bad prompt should not end the run
             print(f"  {prompt:15s} ERROR {exc}")

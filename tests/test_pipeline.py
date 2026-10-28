@@ -156,10 +156,71 @@ def test_reject_rule():
     print("  reject rule ok: only weak AND disowned detections are dropped")
 
 
+def test_evaluate():
+    from pol.evaluate import init_rows, problems, score
+    # Pipeline: couch seen in two photos merged correctly; a second couch split
+    # into two lines; one false lamp; one detection rejected.
+    items = [
+        {"item_id": "item-001", "category": "couch", "detections": [
+            {"det_id": "a:couch:0", "photo": "a.jpg", "confidence": 0.9},
+            {"det_id": "b:couch:0", "photo": "b.jpg", "confidence": 0.9}]},
+        {"item_id": "item-002", "category": "couch", "detections": [
+            {"det_id": "b:couch:1", "photo": "b.jpg", "confidence": 0.8}]},
+        {"item_id": "item-003", "category": "couch", "detections": [
+            {"det_id": "c:couch:0", "photo": "c.jpg", "confidence": 0.8}]},
+        {"item_id": "item-004", "category": "lamp", "detections": [
+            {"det_id": "c:lamp:0", "photo": "c.jpg", "confidence": 0.7}]},
+    ]
+    rejected = [{"det_id": "a:tv_stand:1", "photo": "a.jpg", "category": "tv stand", "confidence": 0.58}]
+    rows = init_rows(items, rejected)
+    assert len(problems(rows)) == 6, "every prefilled row needs a yes/no before scoring"
+
+    label = {"a:couch:0": ("yes", "grey"), "b:couch:0": ("yes", "grey"), "b:couch:1": ("yes", "brown"),
+             "c:couch:0": ("yes", "brown"), "c:lamp:0": ("no", ""), "a:tv_stand:1": ("no", "")}
+    for r in rows:
+        r["correct"], r["item_tag"] = label[r["det_id"]]
+    rows.append({"photo": "a.jpg", "det_id": "", "category": "side table", "status": "missed",
+                 "correct": "", "item_tag": "oak-side-table"})
+    assert problems(rows) == [], problems(rows)
+
+    s = score(rows, items)
+    assert s["items"] == {"real": 3, "on_schedule": 2, "missing_from_claim": ["oak-side-table"],
+                          "recall": 0.667}, s["items"]
+    assert s["sightings"]["found"] == 4 and s["sightings"]["false_finds"] == 1
+    assert s["sightings"]["rightly_rejected"] == 1
+    assert s["schedule_lines"] == {"total": 4, "false": 1, "duplicates": 1}, s["schedule_lines"]
+    assert s["merges"] == {"correct": 1, "wrong": 0, "missed": 1}, s["merges"]
+
+    # Refreshing the sheet keeps what was labelled, including hand-added misses.
+    again = init_rows(items, rejected, rows)
+    assert len(again) == len(rows) and problems(again) == []
+    print(f"  evaluate ok: item recall {s['items']['recall']}, merges {s['merges']}")
+
+
+def test_usage_cost():
+    import json
+    from pol.api import call_cost, log_usage
+    from pol.evaluate import cost
+    muse = {"input_tokens": 1394, "input_tokens_details": {"cached_tokens": 1379}, "output_tokens": 546}
+    assert abs(call_cost("muse-spark-1.1", muse) - (15 * 1.25 + 1379 * 0.15 + 546 * 4.25) / 1e6) < 1e-12
+    assert call_cost("sam-3.1", {"images_processed": 1}) == 0.0025
+    assert call_cost("some-new-model", muse) is None, "an unpriced model must not count as free"
+    log = TMP / "usage.jsonl"
+    for _ in range(2):
+        log_usage("sam-3.1", {"images_processed": 1}, "C:/photos/tv.jpg", log)
+    log_usage("sam-3.1", {"images_processed": 1}, "other.jpg", log)
+    c = cost(log, {"tv.jpg"})
+    assert c["calls"] == {"sam-3.1": 2} and c["total"] == 0.005 and c["per_photo"] == 0.005, c
+    assert json.loads(log.read_text().splitlines()[0])["photo"] == "tv.jpg"
+    print(f"  cost ok: {c}")
+
+
 if __name__ == "__main__":
     items = test_merge()
     test_judge_unsure_stays_separate()
     test_schedule(items)
     test_no_evidence_no_line()
     test_reject_rule()
+    test_evaluate()
+    test_usage_cost()
     print("all passed")

@@ -53,7 +53,7 @@ def load_detections(runs_dir: Path, crops_dir: Path) -> list[Detection]:
     return list(unique.values())
 
 
-def describe_and_verify(dets: list[Detection]) -> tuple[list[Detection], list[str]]:
+def describe_and_verify(dets: list[Detection]) -> tuple[list[Detection], list[tuple[Detection, str]]]:
     """Muse Spark names every detection; weak ones it disowns are dropped."""
     from pol.api import load_key, muse_model
     from pol.describe import describe_crop, should_reject
@@ -62,14 +62,14 @@ def describe_and_verify(dets: list[Detection]) -> tuple[list[Detection], list[st
     kept, rejected = [], []
     for d in dets:
         try:
-            v = describe_crop(d.crop, d.category, key, model)
+            v = describe_crop(d.crop, d.category, key, model, photo=d.photo)
         except Exception as exc:
             print(f"  {d.det_id}: describe failed ({exc}); kept as detected")
             kept.append(d)
             continue
         if should_reject(d.confidence, v):
-            rejected.append(f"{d.det_id} (SAM {d.confidence:.2f}): model says '{v.name}', "
-                            f"is_{d.category.replace(' ', '_')}={v.is_category}, standalone={v.standalone_item}")
+            rejected.append((d, f"model says '{v.name}', is_{d.category.replace(' ', '_')}="
+                                f"{v.is_category}, standalone={v.standalone_item}"))
             continue
         d.description = v.description or v.name
         print(f"  {d.det_id}: {v.name}" + (f" [{v.brand_model}]" if v.brand_model else ""))
@@ -107,7 +107,7 @@ def main() -> None:
     # Collapse overlapping finds in one photo first ("couch" and "sofa" on the
     # same object), so Muse Spark is not paid to describe the same thing twice.
     dets, _ = dedupe_within_photo(dets)
-    rejected: list[str] = []
+    rejected: list[tuple[Detection, str]] = []
     if args.describe:
         dets, rejected = describe_and_verify(dets)
 
@@ -122,9 +122,14 @@ def main() -> None:
         "detections": [{"det_id": d.det_id, "photo": d.photo, "box": d.box,
                         "confidence": d.confidence, "crop": d.crop} for d in it.detections],
     } for it in items], indent=2), encoding="utf-8")
+    # Kept for scripts/evaluate.py, so a wrong rejection counts as a missed item.
+    (out / "rejected.json").write_text(json.dumps([{
+        "det_id": d.det_id, "photo": d.photo, "category": d.category, "box": d.box,
+        "confidence": d.confidence, "crop": d.crop, "reason": reason,
+    } for d, reason in rejected], indent=2), encoding="utf-8")
 
-    for line in rejected:
-        print(f"rejected: {line}")
+    for d, reason in rejected:
+        print(f"rejected: {d.det_id} (SAM {d.confidence:.2f}): {reason}")
     review = [p for p in decisions if p.outcome == "review"]
     t = totals(rows)
     print(f"{len(dets)} detections -> {len(items)} items, {len(review)} pairs awaiting model review")

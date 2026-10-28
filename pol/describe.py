@@ -42,12 +42,13 @@ class Verdict:
     raw: str
 
 
-def describe_crop(crop_path: str, category: str, key: str, model: str) -> Verdict:
+def describe_crop(crop_path: str, category: str, key: str, model: str,
+                  photo: str | None = None) -> Verdict:
     file_id = upload(crop_path, key)
     text = respond(key, model, [
         {"type": "input_text", "text": PROMPT.format(category=category)},
         {"type": "input_image", "file_id": file_id},
-    ])
+    ], photo=photo)
     data = parse_json_reply(text)
     return Verdict(
         is_category=bool(data.get("is_category", False)),
