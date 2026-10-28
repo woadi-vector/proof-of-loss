@@ -151,7 +151,7 @@ def main() -> None:
         conf = [round(b.confidence, 2) for b in boxes if b.confidence is not None]
         print(f"  {prompt:15s} {len(boxes)} found  conf {conf}  ({time.time() - t0:.1f}s)")
         for b in boxes:
-            items.append({"prompt": prompt, "object_id": b.object_id,
+            items.append({"photo": str(photo.resolve()), "prompt": prompt, "object_id": b.object_id,
                           "box": [b.left, b.top, b.right, b.bottom],
                           "confidence": b.confidence})
 
