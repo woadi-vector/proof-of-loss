@@ -31,7 +31,7 @@ def fake_crop(name: str, rgb: tuple[int, int, int], size=(160, 80), brightness=1
         for y in range(size[1]):
             n = rnd.randint(-12, 12)
             px[x, y] = tuple(max(0, min(255, int((c + n) * brightness))) for c in rgb)
-    path = TMP / f"{name}.jpg"
+    path = TMP / f"{name.replace(':', '_')}.jpg"   # Windows forbids ":" in file names
     im.save(path)
     return str(path)
 
