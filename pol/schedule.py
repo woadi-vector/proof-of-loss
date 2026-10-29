@@ -36,7 +36,7 @@ MAX_DEPRECIATION = 0.80   # never depreciate below 20% of replacement cost
 
 COLUMNS = [
     "item_id", "room", "description", "brand_model", "quantity",
-    "earliest_photo_date", "age_years", "purchased_from",
+    "purchase_year", "earliest_photo_date", "age_years", "purchased_from",
     "replacement_cost", "price_basis", "price_sources",
     "useful_life_years", "depreciation_pct", "depreciation_amount", "actual_cash_value",
     "recoverable_depreciation", "depreciation_explained",
@@ -52,7 +52,8 @@ class ClaimantEntry:
     room: str = ""
     quantity: int = 1
     purchased_from: str = ""
-    purchase_date: date | None = None
+    purchase_year: int | None = None           # what claimants actually remember
+    purchase_date: date | None = None          # exact date if they have a receipt
     replacement_cost: float | None = None      # from a receipt; outranks comparables
     comparables: list[Comparable] | None = None
 
@@ -85,21 +86,29 @@ def build_rows(items: list[Item], entries: dict[str, ClaimantEntry] | None = Non
         e = entries.get(it.item_id, ClaimantEntry())
         best = it.best_detection
 
-        # Age: the claimant's purchase date if given, otherwise the earliest photo.
+        # Age, in order of preference: the year the claimant says they bought it
+        # (or an exact receipt date), otherwise the earliest photo showing it.
+        photo_year = it.earliest_date.year if it.earliest_date else None
         if e.purchase_date:
-            start, age_basis = e.purchase_date, "purchase date"
+            age_exact, age_basis = years_between(e.purchase_date, as_of), f"bought {e.purchase_date.isoformat()}"
+            bought_year = e.purchase_date.year
+        elif e.purchase_year:
+            # Whole years from the year entered: bought 2019, now 2026, 7 years.
+            age_exact, age_basis = float(max(0, as_of.year - e.purchase_year)), f"bought {e.purchase_year}"
+            bought_year = e.purchase_year
         elif it.earliest_date:
-            start, age_basis = it.earliest_date, "earliest photo"
+            age_exact, age_basis = (years_between(it.earliest_date, as_of),
+                                  f"no purchase year given; seen in a photo from {it.earliest_date:%B %Y}")
+            bought_year = None
         else:
-            start, age_basis = None, ""
-        if e.purchase_date and it.earliest_date and it.earliest_date < e.purchase_date:
-            flags.append("photo predates stated purchase date")
-        age_exact = years_between(start, as_of) if start else None
+            age_exact, age_basis, bought_year = None, "", None
+        if bought_year and photo_year and photo_year < bought_year:
+            flags.append(f"photo from {photo_year} predates stated purchase year {bought_year}")
         age = round(age_exact, 1) if age_exact is not None else None
         if age is None:
-            flags.append("no date: add purchase date")
-        elif age_basis == "earliest photo":
-            flags.append("age from earliest photo (minimum)")
+            flags.append("no date: add the year purchased")
+        elif bought_year is None:
+            flags.append("age from earliest photo (minimum); add the year purchased")
 
         sources: list[Comparable] = []
         if e.replacement_cost is not None:
@@ -128,6 +137,7 @@ def build_rows(items: list[Item], entries: dict[str, ClaimantEntry] | None = Non
             "description": description,
             "brand_model": e.brand_model,
             "quantity": e.quantity,
+            "purchase_year": bought_year or "",
             "earliest_photo_date": it.earliest_date.isoformat() if it.earliest_date else "",
             "age_years": "" if age is None else age,
             "purchased_from": e.purchased_from,
@@ -139,8 +149,8 @@ def build_rows(items: list[Item], entries: dict[str, ClaimantEntry] | None = Non
             "depreciation_amount": "" if dep_amt is None else f"{dep_amt:.2f}",
             "actual_cash_value": "" if acv is None else f"{acv:.2f}",
             "recoverable_depreciation": "" if dep_amt is None else f"{dep_amt:.2f}",
-            "depreciation_explained": explain_depreciation(
-                age_exact, years, dep, capped, rcv, acv),
+            "depreciation_explained": (f"{age_basis[0].upper()}{age_basis[1:]}. " if age_basis else "")
+            + explain_depreciation(age_exact, years, dep, capped, rcv, acv),
             "evidence_photos": "; ".join(Path(p).name for p in it.photos),
             "evidence_crop": best.crop,
             "flags": "; ".join(flags),

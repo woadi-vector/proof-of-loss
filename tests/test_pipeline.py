@@ -126,7 +126,7 @@ def test_schedule(items):
     assert "age from earliest photo" in r_grey["flags"]
 
     # The photo shows the TV in March 2019; the claimant says bought Jan 2020.
-    assert "photo predates stated purchase date" in r_tv["flags"], r_tv["flags"]
+    assert "photo from 2019 predates stated purchase year 2020" in r_tv["flags"], r_tv["flags"]
     assert r_tv["depreciation_pct"] == 80.0, "capped at the 80% maximum"
 
     unpriced = [r for r in rows if not r["replacement_cost"]]
@@ -188,6 +188,18 @@ def test_pricing_and_explanation(items):
     print(f"    {r['depreciation_explained']}")
 
 
+def test_purchase_year(items):
+    grey = next(it for it in items if it.category == "couch" and len(it.detections) == 2)
+    r = build_rows([grey], {grey.item_id: ClaimantEntry(purchase_year=2020, replacement_cost=1000.0)},
+                   as_of=date(2026, 10, 28))[0]
+    assert r["purchase_year"] == 2020 and r["age_years"] == 6.0, (r["purchase_year"], r["age_years"])
+    assert r["depreciation_pct"] == 60.0 and r["actual_cash_value"] == "400.00", r
+    assert r["depreciation_explained"].startswith("Bought 2020. Straight-line: 6.0 years"), r["depreciation_explained"]
+    # The couch is in a 2019 photo, so a stated 2020 purchase is flagged for the claimant to fix.
+    assert "photo from 2019 predates stated purchase year 2020" in r["flags"], r["flags"]
+    print(f"  purchase year ok: {r['depreciation_explained']}")
+
+
 if __name__ == "__main__":
     items = test_merge()
     test_judge_unsure_stays_separate()
@@ -195,4 +207,5 @@ if __name__ == "__main__":
     test_no_evidence_no_line()
     test_reject_rule()
     test_pricing_and_explanation(items)
+    test_purchase_year(items)
     print("all passed")

@@ -43,6 +43,7 @@ Modules: `pol/api.py` (Meta client), `pol/prompts.py`, `pol/photos.py`, `pol/mer
 * Depreciation is a visible, editable straight-line table (`--life`); `MAX_DEPRECIATION` 80%.
 * Never merge two detections from the same photo, never across categories; an undecided pair stays two items (a duplicate is caught in review; a wrong merge loses money).
 * A detection is rejected only if SAM confidence < 0.65 AND Muse Spark says it is not a standalone item of that category.
+* Age comes from the year the claimant says they bought the item (`purchase_year`, whole years: bought 2019, in 2026 that is 7 years), or an exact receipt date; only if neither is given, the earliest photo, flagged as a minimum. Depreciation then computes automatically. Jason's call: claimants enter a year, not a date.
 * Photo dates come from EXIF only, never file times. Older documented age means MORE depreciation, not less: photos prove ownership; they do not raise payouts. When a photo predates the claimant's stated purchase date, flag it.
 
 ## Findings so far
