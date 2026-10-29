@@ -38,7 +38,8 @@ Modules: `pol/api.py` (Meta client), `pol/prompts.py`, `pol/photos.py`, `pol/mer
 ## Rules enforced in code (do not weaken)
 
 * No evidence, no line: every schedule row cites a photo and crop.
-* The model never sets a price. Replacement cost comes from the claimant or is flagged missing.
+* No price without sources. Replacement cost is the claimant's receipt or stated price if given; otherwise the average of cited comparable listings, computed by code in `pol/pricing.py` (each comp needs source, URL and price; with 3+ comps, listings under 40% or over 250% of the median are set aside as not like kind and quality; fewer than 2 comps is flagged as thin support). A model may FIND listings; it never writes the number. Jason's reason: negotiating price is the most aggravating part of a contents claim, so every price must arrive with its backup.
+* Every row explains its own depreciation in plain words (`depreciation_explained`) and shows `recoverable_depreciation`, the amount a replacement cost policy pays back once the item is replaced; claimants often never collect it.
 * Depreciation is a visible, editable straight-line table (`--life`); `MAX_DEPRECIATION` 80%.
 * Never merge two detections from the same photo, never across categories; an undecided pair stays two items (a duplicate is caught in review; a wrong merge loses money).
 * A detection is rejected only if SAM confidence < 0.65 AND Muse Spark says it is not a standalone item of that category.
@@ -54,6 +55,7 @@ Modules: `pol/api.py` (Meta client), `pol/prompts.py`, `pol/photos.py`, `pol/mer
 
 ## Open items, in order
 
+0. Comparable finder (`pol/comps.py`, new): for each item, use Muse Spark with search grounding (docs: https://dev.meta.ai/docs/search-grounding) to find 3 to 5 current listings of like kind and quality, returned as structured JSON (source, url, title, price, retrieved date). Feed them to `ClaimantEntry.comparables`; `pol/pricing.py` does the math. Prompt must forbid inventing listings; drop any comp whose URL the response did not actually cite. Add `--price` to `build_schedule.py`. Log cost.
 1. Real test set: 40 to 60 original photos across Jason's homes; hand-label items for an honest found/missed/wrong-merge evaluation.
 2. Walkthrough video: SAM 3.1 video tracking, plus Muse Voice Transcribe on narration to fill purchase details.
 3. UI: photo grid, item cards with proof crops side by side, inventory table with totals, CSV export.

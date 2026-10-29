@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 from pol.merge import dedupe_within_photo, merge  # noqa: E402
 from pol.model import Detection  # noqa: E402
 from pol.photos import crop, photo_date  # noqa: E402
+from pol.pricing import Comparable  # noqa: E402
 from pol.prompts import category_for  # noqa: E402
 from pol.schedule import ClaimantEntry, build_rows, load_life_table, totals, write_csv  # noqa: E402
 
@@ -85,6 +86,8 @@ def load_entries(path: str | None) -> dict[str, ClaimantEntry]:
     for item_id, e in raw.items():
         if e.get("purchase_date"):
             e["purchase_date"] = date.fromisoformat(e["purchase_date"])
+        if e.get("comparables"):
+            e["comparables"] = [Comparable(**c) for c in e["comparables"]]
         out[item_id] = ClaimantEntry(**e)
     return out
 
@@ -129,6 +132,10 @@ def main() -> None:
     t = totals(rows)
     print(f"{len(dets)} detections -> {len(items)} items, {len(review)} pairs awaiting model review")
     print(f"{t['priced_lines']} priced, {t['unpriced_lines']} need a replacement cost")
+    if t["priced_lines"]:
+        print(f"Replacement cost ${t['replacement_cost_total']:,.2f}, actual cash value "
+              f"${t['actual_cash_value_total']:,.2f}, recoverable depreciation "
+              f"${t['recoverable_depreciation_total']:,.2f}")
     print(f"Schedule: {out / 'schedule.csv'}")
 
 

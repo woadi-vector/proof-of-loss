@@ -2,8 +2,10 @@
 
 Rules this module enforces, whatever any model says:
   * no evidence, no line: every row cites at least one photo and crop
-  * the model never sets a price: replacement cost comes from the claimant, or
-    is left blank and flagged
+  * no price without sources: replacement cost is the claimant's receipt, or
+    the average of cited comparable listings computed in pol/pricing.py; with
+    neither, it is left blank and flagged
+  * every line explains its own depreciation and shows the recoverable part
   * depreciation uses a visible, editable table, never a hidden guess
   * age comes from the earliest photo the item appears in, which is a floor
     the claimant can document, not an estimate
@@ -18,6 +20,7 @@ from datetime import date
 from pathlib import Path
 
 from .model import Item
+from .pricing import Comparable, explain_depreciation, price_from_comps
 
 # Useful life in years by category, used for straight-line depreciation.
 # These are starting defaults for the demo, not any carrier's table: carriers
@@ -34,7 +37,9 @@ MAX_DEPRECIATION = 0.80   # never depreciate below 20% of replacement cost
 COLUMNS = [
     "item_id", "room", "description", "brand_model", "quantity",
     "earliest_photo_date", "age_years", "purchased_from",
-    "replacement_cost", "depreciation_pct", "actual_cash_value",
+    "replacement_cost", "price_basis", "price_sources",
+    "useful_life_years", "depreciation_pct", "depreciation_amount", "actual_cash_value",
+    "recoverable_depreciation", "depreciation_explained",
     "evidence_photos", "evidence_crop", "flags",
 ]
 
@@ -48,7 +53,8 @@ class ClaimantEntry:
     quantity: int = 1
     purchased_from: str = ""
     purchase_date: date | None = None
-    replacement_cost: float | None = None
+    replacement_cost: float | None = None      # from a receipt; outranks comparables
+    comparables: list[Comparable] | None = None
 
 
 def load_life_table(path: str | Path | None) -> dict[str, float]:
@@ -95,13 +101,22 @@ def build_rows(items: list[Item], entries: dict[str, ClaimantEntry] | None = Non
         elif age_basis == "earliest photo":
             flags.append("age from earliest photo (minimum)")
 
-        rcv = e.replacement_cost
+        sources: list[Comparable] = []
+        if e.replacement_cost is not None:
+            rcv, basis = e.replacement_cost, "claimant receipt or stated price"
+        else:
+            pr = price_from_comps(e.comparables or [])
+            rcv, basis, sources = pr.replacement_cost, pr.basis, pr.sources
+            flags.extend(pr.flags if (e.comparables or []) else [])
         if rcv is None:
             flags.append("replacement cost needed")
 
         years = life.get(it.category, FALLBACK_LIFE_YEARS)
-        dep = min(MAX_DEPRECIATION, age_exact / years) if age_exact is not None else None
+        raw_dep = age_exact / years if age_exact is not None else None
+        dep = min(MAX_DEPRECIATION, raw_dep) if raw_dep is not None else None
+        capped = raw_dep is not None and raw_dep > MAX_DEPRECIATION
         acv = round(rcv * (1 - dep), 2) if (rcv is not None and dep is not None) else None
+        dep_amt = round(rcv - acv, 2) if acv is not None else None
 
         description = e.description or best.description or it.category
         if not e.description and not best.description:
@@ -117,8 +132,15 @@ def build_rows(items: list[Item], entries: dict[str, ClaimantEntry] | None = Non
             "age_years": "" if age is None else age,
             "purchased_from": e.purchased_from,
             "replacement_cost": "" if rcv is None else f"{rcv:.2f}",
+            "price_basis": basis if rcv is not None else "",
+            "price_sources": " | ".join(f"{c.source} ${c.price:,.2f} {c.url}" for c in sources),
+            "useful_life_years": years,
             "depreciation_pct": "" if dep is None else round(dep * 100, 1),
+            "depreciation_amount": "" if dep_amt is None else f"{dep_amt:.2f}",
             "actual_cash_value": "" if acv is None else f"{acv:.2f}",
+            "recoverable_depreciation": "" if dep_amt is None else f"{dep_amt:.2f}",
+            "depreciation_explained": explain_depreciation(
+                age_exact, years, dep, capped, rcv, acv),
             "evidence_photos": "; ".join(Path(p).name for p in it.photos),
             "evidence_crop": best.crop,
             "flags": "; ".join(flags),
@@ -129,9 +151,12 @@ def build_rows(items: list[Item], entries: dict[str, ClaimantEntry] | None = Non
 def totals(rows: list[dict]) -> dict:
     rcv = sum(float(r["replacement_cost"]) * int(r["quantity"]) for r in rows if r["replacement_cost"])
     acv = sum(float(r["actual_cash_value"]) * int(r["quantity"]) for r in rows if r["actual_cash_value"])
+    rec = sum(float(r["recoverable_depreciation"]) * int(r["quantity"])
+              for r in rows if r["recoverable_depreciation"])
     priced = sum(1 for r in rows if r["replacement_cost"])
     return {"lines": len(rows), "priced_lines": priced, "unpriced_lines": len(rows) - priced,
-            "replacement_cost_total": round(rcv, 2), "actual_cash_value_total": round(acv, 2)}
+            "replacement_cost_total": round(rcv, 2), "actual_cash_value_total": round(acv, 2),
+            "recoverable_depreciation_total": round(rec, 2)}
 
 
 def write_csv(rows: list[dict], path: str | Path, columns: list[str] | None = None,

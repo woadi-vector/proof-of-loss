@@ -156,10 +156,43 @@ def test_reject_rule():
     print("  reject rule ok: only weak AND disowned detections are dropped")
 
 
+def test_pricing_and_explanation(items):
+    from pol.pricing import Comparable, price_from_comps
+    comps = [
+        Comparable("Store A", "https://a.example/sofa", 899.00),
+        Comparable("Store B", "https://b.example/sofa", 1049.00),
+        Comparable("Store C", "https://c.example/sofa", 979.00),
+        Comparable("Store D", "https://d.example/sofa", 4200.00),   # designer piece, not like kind
+        Comparable("No link", "", 950.00),                            # unsupported, not counted
+    ]
+    pr = price_from_comps(comps)
+    assert pr.replacement_cost == round((899 + 1049 + 979) / 3, 2), pr
+    assert "average of 3 listings ($899.00 to $1,049.00)" == pr.basis, pr.basis
+    assert any("far from the median" in f for f in pr.flags) and any("not counted" in f for f in pr.flags)
+    assert "thin price support" in price_from_comps(comps[:1]).flags[0]
+
+    grey = next(it for it in items if it.category == "couch" and len(it.detections) == 2)
+    rows = build_rows([grey], {grey.item_id: ClaimantEntry(comparables=comps)}, as_of=date(2026, 10, 27))
+    r = rows[0]
+    assert r["replacement_cost"] == f"{pr.replacement_cost:.2f}"
+    assert r["price_sources"].count("http") == 3
+    assert float(r["depreciation_amount"]) + float(r["actual_cash_value"]) == float(r["replacement_cost"])
+    assert r["recoverable_depreciation"] == r["depreciation_amount"]
+    assert "10-year useful life" in r["depreciation_explained"] and "recoverable" in r["depreciation_explained"]
+
+    # A receipt outranks the comps.
+    r2 = build_rows([grey], {grey.item_id: ClaimantEntry(replacement_cost=1100.0, comparables=comps)},
+                    as_of=date(2026, 10, 27))[0]
+    assert r2["replacement_cost"] == "1100.00" and r2["price_basis"] == "claimant receipt or stated price"
+    print(f"  pricing ok: {r['price_basis']} -> ${r['replacement_cost']}")
+    print(f"    {r['depreciation_explained']}")
+
+
 if __name__ == "__main__":
     items = test_merge()
     test_judge_unsure_stays_separate()
     test_schedule(items)
     test_no_evidence_no_line()
     test_reject_rule()
+    test_pricing_and_explanation(items)
     print("all passed")
