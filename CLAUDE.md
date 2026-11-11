@@ -24,7 +24,13 @@ New modules (offline, no model calls yet):
 * `pol/valuation.py`: price, depreciation, claimed minus documented gap, and the `assetValue` figure for Clarice's OVER_VALUE rule.
 * `pol/lkq.py`: like kind and quality. Prices the item the walk actually saw from cited listings and shows the betterment (claimed replacement minus that price) in dollars. Raised only past 25% over the observed price and $50 total; no clear frame or no cited listings means no comparison. A Consistent line with betterment becomes a Discrepancy. This is the flag Jason's claims manager said he would trust.
 
-Tests: `python -m pytest -q` (new modules) and `python tests/test_pipeline.py` (merge and schedule). Next: a glasses video capture pipeline (transcribe the walk, pull frames, find items), then the comps finder. Model calls will go through Google (Vertex AI preferred for carrier pilots), behind one interface so Azure or AWS can replace it.
+* `pol/providers.py`: the one interface for model calls (transcribe, extract rooms and items from the transcript, check one frame). Every call goes in a Ledger with cost; `CachedProvider` replays answers at $0; `StubProvider` answers from a script; `GoogleProvider` is a placeholder until the Google Cloud project is attached.
+* `pol/walk.py`: one recorded walk (glasses or phone video) to first-walk observations. Hashes the video first and never modifies it; pulls audio with ffmpeg; for each item named, pulls five frames around that moment and keeps the sharpest; asks whether the frame clearly shows the item; an unclear frame is kept and marked, never dropped; rooms come only from what the adjuster said. Writes `manifest.json` (every file hash) and `ledger.json`.
+* `scripts/walk.py <video> --script notes.json`: runs a walk end to end with stub answers and writes `runs/walk_<stamp>/records.json`. `--provider google` once Google is attached. Needs ffmpeg and ffprobe on PATH (on the Windows PC: `winget install Gyan.FFmpeg`, not yet installed there as far as we know).
+
+`walk.py` and `providers.py` are Proof of Loss only; Clarice captures per checklist step instead, so they are not mirrored into Clarice's `contents-service/`. Everything else above is mirrored (Clarice PR #47 carries `lkq.py`).
+
+Tests: `python -m pytest -q` (new modules, includes a synthetic video built with ffmpeg) and `python tests/test_pipeline.py` (merge and schedule). Next: attach Google (Vertex AI) to `GoogleProvider`, then the comps finder. Model calls will go through Google (Vertex AI preferred for carrier pilots), behind one interface so Azure or AWS can replace it.
 
 ## Deadlines and rules (times Central)
 
