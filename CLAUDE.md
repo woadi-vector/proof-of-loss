@@ -10,6 +10,21 @@ After a flood or fire, a homeowner must list every belonging they lost, with age
 
 Structure and rebuild estimating (Xactimate) is roadmap only: Verisk's line codes and price lists are proprietary, and using them would break the rights rule. Who pays: public adjusters, as client intake.
 
+## Since Nov 9 2026: carrier side, combining with Clarice
+
+The hackathon is over (the entry switched to another build), so the event rules below are history; the "Rules enforced in code" still hold. Proof of Loss is now the contents piece of a joint product with Terry (Van Williams) and his Clarice investigation app (github.com/vanlaure/clarice-command-center), split 50/50 as a whole app. Plan: build Proof of Loss standalone first, then fold it into Clarice once there is demand. The same contents code also lives in Clarice's `contents-service/` folder (PRs #45, #46); keep the two copies in step until they are combined.
+
+Direction: carrier side (field adjusters, independent adjusters, contents vendors), not claimant side. Never states fraud, a score or a probability; every result stays NEEDS_REVIEW until a person signs it off. Room measurements and damage scope (Xactimate) are not built: Hover, Cotality, XactGen and Encircle already do them. Output feeds the tools carriers use (Xactimate, XactContents, Enservio); cited comps are the pricing fallback.
+
+New modules (offline, no model calls yet):
+
+* `pol/records.py`: schedule lines, sightings, rooms, conditions, results.
+* `pol/inventory.py`: document mode, the adjuster's first walk, before the sworn schedule exists. No frame, no record.
+* `pol/matcher.py`: check mode, claimed versus observed, six statuses. Any visual flag needs a reversed second look; a room nobody walked is Not checked; burn-through absence is Can't tell without a recorded sign; theft absence carries no weight; recorded undamaged but claimed as a loss is a discrepancy.
+* `pol/valuation.py`: price, depreciation, claimed minus documented gap, and the `assetValue` figure for Clarice's OVER_VALUE rule.
+
+Tests: `python -m pytest -q` (new modules) and `python tests/test_pipeline.py` (merge and schedule). Next: like kind and quality check (price the observed model, show the betterment gap), then a glasses video capture pipeline. Model calls will go through Google (Vertex AI preferred for carrier pilots), behind one interface so Azure or AWS can replace it.
+
 ## Deadlines and rules (times Central)
 
 * Submissions close **Wed Nov 4, 8:00 PM Central** (9 PM ET). Aim to submit by noon that day.
