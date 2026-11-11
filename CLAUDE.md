@@ -22,8 +22,9 @@ New modules (offline, no model calls yet):
 * `pol/inventory.py`: document mode, the adjuster's first walk, before the sworn schedule exists. No frame, no record.
 * `pol/matcher.py`: check mode, claimed versus observed, six statuses. Any visual flag needs a reversed second look; a room nobody walked is Not checked; burn-through absence is Can't tell without a recorded sign; theft absence carries no weight; recorded undamaged but claimed as a loss is a discrepancy.
 * `pol/valuation.py`: price, depreciation, claimed minus documented gap, and the `assetValue` figure for Clarice's OVER_VALUE rule.
+* `pol/lkq.py`: like kind and quality. Prices the item the walk actually saw from cited listings and shows the betterment (claimed replacement minus that price) in dollars. Raised only past 25% over the observed price and $50 total; no clear frame or no cited listings means no comparison. A Consistent line with betterment becomes a Discrepancy. This is the flag Jason's claims manager said he would trust.
 
-Tests: `python -m pytest -q` (new modules) and `python tests/test_pipeline.py` (merge and schedule). Next: like kind and quality check (price the observed model, show the betterment gap), then a glasses video capture pipeline. Model calls will go through Google (Vertex AI preferred for carrier pilots), behind one interface so Azure or AWS can replace it.
+Tests: `python -m pytest -q` (new modules) and `python tests/test_pipeline.py` (merge and schedule). Next: a glasses video capture pipeline (transcribe the walk, pull frames, find items), then the comps finder. Model calls will go through Google (Vertex AI preferred for carrier pilots), behind one interface so Azure or AWS can replace it.
 
 ## Deadlines and rules (times Central)
 
