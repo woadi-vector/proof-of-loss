@@ -1,0 +1,11 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "runtime": "python312",
+      "ignore": ["venv", ".git", "__pycache__", "*.pyc"],
+      "predeploy": ["python scripts/sync_functions.py"]
+    }
+  ]
+}
