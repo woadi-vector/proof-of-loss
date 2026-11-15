@@ -199,30 +199,231 @@ class StubProvider:
 
 # Google (Vertex AI) -------------------------------------------------------------
 
-class GoogleProvider:
-    """Vertex AI Gemini, to be wired once the Google Cloud project is attached.
+def _env_file() -> dict[str, str]:
+    env = Path(__file__).resolve().parent.parent / ".env"
+    out: dict[str, str] = {}
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
 
-    Planned: transcribe and extract_notes as audio and text calls with a JSON
-    response schema; check_frame as one image plus the item description, asking
-    for clear / shows_item / note, with "unsure" allowed. Token counts and cost
-    come from the response's usage metadata into the Ledger.
+
+def google_settings() -> dict[str, str]:
+    """Project, location, model and prices, from the environment or .env.
+
+    Sign-in is Application Default Credentials (gcloud auth application-default
+    login), so no key lives in .env. Prices are per million tokens and default to
+    Gemini 2.5 Flash on Vertex; set them in .env when the model changes, and
+    confirm against the Vertex pricing page. Cost in the ledger is an estimate
+    from these numbers and the response's own token counts.
+    """
+    import os
+    f = _env_file()
+
+    def get(k: str, default: str = "") -> str:
+        return os.environ.get(k) or f.get(k) or default
+
+    return {"project": get("GOOGLE_CLOUD_PROJECT"),
+            "location": get("GOOGLE_CLOUD_LOCATION", "us-central1"),
+            "model": get("GOOGLE_MODEL", "gemini-2.5-flash"),
+            "price_in": get("GOOGLE_PRICE_IN_PER_M", "0.30"),
+            "price_audio_in": get("GOOGLE_PRICE_AUDIO_IN_PER_M", "1.00"),
+            "price_out": get("GOOGLE_PRICE_OUT_PER_M", "2.50")}
+
+
+INLINE_LIMIT = 15 * 1024 * 1024        # Vertex caps an inline request near 20 MB
+
+
+def _yes_no(v) -> bool | None:
+    v = str(v).strip().lower()
+    return True if v == "yes" else False if v == "no" else None
+
+
+TRANSCRIBE_PROMPT = """Transcribe this recording of an insurance adjuster walking a loss site.
+Return segments in order, each one sentence or short phrase, with start and end
+times in seconds from the start of the recording. Write exactly what was said.
+Do not summarize, correct, or add words. Mark unclear speech as [inaudible]."""
+
+NOTES_PROMPT = """You are reading the transcript of an insurance adjuster's narrated walk
+through a loss site. Each line is [start seconds] text.
+
+Return:
+rooms: each room the adjuster says they are entering, with the time they said it.
+  Use only rooms the adjuster names; never infer a room from the items in it.
+  damage is what the adjuster says about the room: none, light (smoke, soot,
+  light water), burned_through, flooded. If they say nothing, use none.
+mentions: each belonging the adjuster names or points out. For each:
+  room: the room they were in when they named it ("" if none named yet)
+  description: the item in plain words, as specific as the adjuster was
+  at_s: the start time of the line where they named it
+  category: a short generic category (television, sofa, laptop, ...)
+  brand_model: only if the adjuster said it, else ""
+  quantity: only if the adjuster said a number, else 1
+  condition: destroyed, damaged, undamaged, or unknown, from the adjuster's words only
+  stated_age_years: only if the adjuster said an age or a purchase year, else null
+  quote: the adjuster's exact words about the item
+
+Use only what the adjuster said. Do not add items that were not named. Do not
+judge whether anything is true, inflated or suspicious."""
+
+FRAME_PROMPT = """This is one frame from an insurance adjuster's walk video, taken at the
+moment the adjuster named an item.
+
+Item named: {description}
+Brand or model said: {brand_model}
+
+Answer:
+clear: yes if the frame is sharp and lit well enough to judge what is in it,
+  no if it is blurred, dark or blocked, unsure otherwise.
+shows_item: yes if the named item is visible in the frame, no if it is not,
+  unsure if you cannot tell. Do not guess the brand or model from the picture.
+note: one short sentence on what you see that decided the answer."""
+
+
+class GoogleProvider:
+    """Vertex AI Gemini: audio transcription, note extraction, frame checks.
+
+    Structured JSON answers through a response schema; token counts from the
+    response's usage metadata go into the Ledger with an estimated cost. A
+    frame answer of "unsure" becomes None, which the walk keeps and marks; it
+    never drops the item.
     """
 
     name = "google"
 
-    def __init__(self, project: str | None = None, location: str = "us-central1",
-                 model: str | None = None):
-        self.project, self.location, self.model = project, location, model
+    def __init__(self, project: str | None = None, location: str | None = None,
+                 model: str | None = None, client=None):
+        cfg = google_settings()
+        self.project = project or cfg["project"]
+        self.location = location or cfg["location"]
+        self.model = model or cfg["model"]
+        self.price_in = float(cfg["price_in"])
+        self.price_audio_in = float(cfg["price_audio_in"])
+        self.price_out = float(cfg["price_out"])
+        self.name = f"google:{self.model}"
+        self._client = client
 
-    def _not_yet(self):
-        raise NotImplementedError(
-            "Google is not attached yet. Run with --provider stub, or replay a cached walk.")
+    @property
+    def client(self):
+        if self._client is None:
+            if not self.project:
+                raise RuntimeError(
+                    "GOOGLE_CLOUD_PROJECT is not set. Add GOOGLE_CLOUD_PROJECT=<project id> to .env.")
+            from google import genai
+            self._client = genai.Client(vertexai=True, project=self.project,
+                                        location=self.location)
+        return self._client
+
+    # one call, measured ------------------------------------------------------
+
+    def _call(self, kind: str, contents: list, schema: dict, ledger: Ledger) -> dict:
+        from google.genai import types
+        cfg = types.GenerateContentConfig(response_mime_type="application/json",
+                                          response_json_schema=schema, temperature=0)
+        t = time.perf_counter()
+        resp = self.client.models.generate_content(model=self.model, contents=contents,
+                                                   config=cfg)
+        secs = time.perf_counter() - t
+        ledger.add(self._record(kind, resp, secs))
+        text = resp.text or ""
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"{kind}: model did not return JSON: {text[:200]!r}") from e
+
+    def _record(self, kind: str, resp, secs: float) -> CallRecord:
+        u = getattr(resp, "usage_metadata", None)
+        if u is None:
+            return CallRecord(kind, self.model, secs)
+        prompt = u.prompt_token_count or 0
+        audio = sum((d.token_count or 0) for d in (u.prompt_tokens_details or [])
+                    if str(getattr(d.modality, "value", d.modality)).upper() == "AUDIO")
+        out = (u.candidates_token_count or 0) + (u.thoughts_token_count or 0)
+        cost = ((prompt - audio) * self.price_in + audio * self.price_audio_in
+                + out * self.price_out) / 1_000_000
+        return CallRecord(kind, self.model, secs, prompt, out, round(cost, 6))
+
+    # the three jobs ----------------------------------------------------------
+
+    def _audio_part(self, audio: Path):
+        from google.genai import types
+        audio = Path(audio)
+        if audio.stat().st_size <= INLINE_LIMIT:
+            return types.Part.from_bytes(data=audio.read_bytes(), mime_type="audio/wav")
+        # Too long to send inline as WAV: send a compressed copy. The original is untouched.
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            ogg = Path(d) / "audio.ogg"
+            subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(audio), "-ac", "1",
+                            "-c:a", "libopus", "-b:a", "24k", str(ogg)], check=True)
+            data = ogg.read_bytes()
+        if len(data) > INLINE_LIMIT:
+            raise RuntimeError("Walk audio is too long to send in one request (about an hour "
+                               "at most). Split the walk into shorter videos.")
+        return types.Part.from_bytes(data=data, mime_type="audio/ogg")
 
     def transcribe(self, audio: Path, ledger: Ledger) -> list[Segment]:
-        self._not_yet()
+        schema = {"type": "object", "properties": {"segments": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"start_s": {"type": "number"}, "end_s": {"type": "number"},
+                           "text": {"type": "string"}},
+            "required": ["start_s", "end_s", "text"]}}}, "required": ["segments"]}
+        d = self._call("transcribe", [self._audio_part(audio), TRANSCRIBE_PROMPT], schema, ledger)
+        return [Segment(float(s["start_s"]), float(s["end_s"]), str(s["text"]).strip())
+                for s in d.get("segments", []) if str(s.get("text", "")).strip()]
 
     def extract_notes(self, segments: list[Segment], ledger: Ledger) -> WalkNotes:
-        self._not_yet()
+        if not segments:
+            return WalkNotes([], [])
+        transcript = "\n".join(f"[{s.start_s:.1f}] {s.text}" for s in segments)
+        damages = [d.value for d in RoomDamage]
+        conditions = [c.value for c in Condition]
+        schema = {"type": "object", "properties": {
+            "rooms": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"}, "start_s": {"type": "number"},
+                "damage": {"type": "string", "enum": damages}},
+                "required": ["name", "start_s", "damage"]}},
+            "mentions": {"type": "array", "items": {"type": "object", "properties": {
+                "room": {"type": "string"}, "description": {"type": "string"},
+                "at_s": {"type": "number"}, "category": {"type": "string"},
+                "brand_model": {"type": "string"}, "quantity": {"type": "integer"},
+                "condition": {"type": "string", "enum": conditions},
+                "stated_age_years": {"type": ["number", "null"]},
+                "quote": {"type": "string"}},
+                "required": ["room", "description", "at_s", "condition", "quote"]}}},
+            "required": ["rooms", "mentions"]}
+        d = self._call("notes", [NOTES_PROMPT, transcript], schema, ledger)
+
+        rooms = [RoomEntry(str(r["name"]).strip(), float(r["start_s"]),
+                           RoomDamage(r["damage"]) if r.get("damage") in damages else RoomDamage.NONE)
+                 for r in d.get("rooms", []) if str(r.get("name", "")).strip()]
+        mentions = []
+        for i, m in enumerate(d.get("mentions", []), 1):
+            age = m.get("stated_age_years")
+            mentions.append(Mention(
+                mention_id=f"m{i:03d}", room=str(m.get("room", "")).strip(),
+                description=str(m["description"]).strip(), at_s=float(m["at_s"]),
+                category=str(m.get("category", "")).strip(),
+                brand_model=str(m.get("brand_model", "")).strip(),
+                quantity=max(1, int(m.get("quantity") or 1)),
+                condition=Condition(m["condition"]) if m.get("condition") in conditions
+                else Condition.UNKNOWN,
+                stated_age_years=float(age) if age is not None else None,
+                quote=str(m.get("quote", "")).strip()))
+        return WalkNotes(rooms, mentions)
 
     def check_frame(self, frame: Path, mention: Mention, ledger: Ledger) -> FrameCheck:
-        self._not_yet()
+        from google.genai import types
+        yn = {"type": "string", "enum": ["yes", "no", "unsure"]}
+        schema = {"type": "object", "properties": {"clear": yn, "shows_item": yn,
+                                                   "note": {"type": "string"}},
+                  "required": ["clear", "shows_item", "note"]}
+        prompt = FRAME_PROMPT.format(description=mention.description,
+                                     brand_model=mention.brand_model or "(none said)")
+        img = types.Part.from_bytes(data=Path(frame).read_bytes(), mime_type="image/jpeg")
+        d = self._call("frame", [img, prompt], schema, ledger)
+        return FrameCheck(_yes_no(d.get("clear")), _yes_no(d.get("shows_item")),
+                          str(d.get("note", "")).strip())
