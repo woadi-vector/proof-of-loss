@@ -6,3 +6,6 @@ __pycache__/
 .venv/
 out/
 .pytest_cache/
+
+# Real client claim files. Never committed; this repo is public.
+claims/
