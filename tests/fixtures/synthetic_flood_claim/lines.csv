@@ -1,0 +1,95 @@
+line,room,item,brand,model,qty,purchase_year,acquired,claimed_unit_cad
+1,Basement office,27 inch monitor (second),Quorra,QM-27,1,2021,purchase,319
+2,Basement family room,Suede loafers,Halsted & Pryor,HP-L12,1,2021,unknown,2240
+3,Storage room,Plastic storage bins (second),,,4,2015,purchase,13
+4,Laundry room,Dryer (second),Kelvane,KD-500,1,2015,purchase,850
+5,Laundry room,Ironing board and iron,Pressa,,1,2016,purchase,101
+6,Basement office,Desktop computer,Quorra,QD-7,,2025,purchase,1661
+7,Storage room,Tool set,Ironclad,IC-200,1,2014,purchase,271
+8,Basement bedroom,Dress shoes,Carrow,,2,2019,purchase,161
+9,Basement bedroom,Queen mattress (second),Restwell,RW-Q12,1,2018,purchase,864
+10,Basement family room,Board games,,,2,2023,purchase,28
+11,Basement bedroom,Dresser,Norbeck,NB-D6,1,2021,purchase,449
+12,Basement bedroom,Quilted shoulder bag,Maison Verel,VR-QS22,1,2021,purchase,4380
+13,Basement family room,Ottoman,Brookline Home,,1,2023,purchase,256
+14,Basement family room,55 inch television,Varion,VX55Q,1,2017,purchase,709
+15,Basement family room,Game console (second),Kestrel,K5,1,2025,purchase,576
+16,Basement bedroom,Nightstands (second),Norbeck,NB-N1,2,2018,purchase,161
+17,Basement family room,Game controllers,Kestrel,KC-2,2,2025,purchase,73
+18,,"Knee boots, black",Ostrava Paris,OP-KB3,1,2024,purchase,3510
+19,Basement family room,Top handle bag,Atelier Corvane,AC-TH41,1,2022,gift,5970
+20,Basement family room,Cosmetics pouch,Maison Verel,VR-CP02,1,2022,gift,690
+21,Basement family room,Soundbar (second),Varion,VS-300,1,2024,purchase,258
+22,Basement bedroom,Chain crossbody,Ostrava Paris,OP-CX5,1,2024,purchase,2470
+23,Basement family room,Mini chain bag,Maison Verel,VR-MC19,1,2022,gift,3640
+24,Storage room,Wicker baskets (second),,,1,2018,purchase,48
+25,Storage room,Holiday decorations,,,1,2021,purchase,298
+26,Basement bedroom,"Leather tote, large",Atelier Corvane,AC-T88,1,2024,purchase,6210
+27,Basement office,Desk,Norbeck,NB-DK2,1,2021,purchase,400
+28,Basement bedroom,Winter boots (second),Fjellhaus,FH-WB,2,2020,purchase,213
+29,Basement family room,Floor lamp (second),Lumio,LM-F2,2,2017,purchase,152
+30,Laundry room,Dehumidifier (second),Airlyn,AL-D35,1,2021,purchase,309
+31,Basement bedroom,Jeans (second),,,4,2020,purchase,125
+32,Basement bedroom,Bed frame,Brookline Home,BH-QF,1,2024,purchase,534
+33,Basement bedroom,Calfskin sneakers,Halsted & Pryor,HP-S07,1,2024,purchase,1860
+34,Basement bedroom,Winter jackets (second),Fjellhaus,,2,2021,purchase,305
+35,Basement bedroom,"Children's toys, assorted (second)",,,3,2021,purchase,43
+36,Basement office,Shelving unit (second),Norbeck,,2,2015,purchase,115
+37,Basement office,Desk (second),Norbeck,NB-DK2,1,2014,purchase,436
+38,Laundry room,Dehumidifier,Airlyn,AL-D35,1,2015,purchase,319
+39,Basement bedroom,Winter jackets,Fjellhaus,,1,2020,purchase,295
+40,Basement bedroom,Nightstands,Norbeck,NB-N1,1,2020,purchase,193
+41,Basement office,Books (second),,,5,2018,purchase,19
+42,Basement office,Shelving unit,Norbeck,,2,2019,purchase,107
+43,Basement family room,Soundbar,Varion,VS-300,1,2019,purchase,298
+44,Laundry room,Washer (second),Kelvane,KW-500,1,2015,purchase,948
+45,Basement bedroom,Bed frame (second),Brookline Home,BH-QF,1,2016,purchase,633
+46,Basement family room,Floor lamp,Lumio,LM-F2,2,2016,purchase,126
+47,Basement bedroom,Jeans,,,5,2019,purchase,123
+48,Storage room,Sleeping bags,Ridgeline,RL-SB,1,2018,purchase,123
+49,Laundry room,Air purifier,Airlyn,AL-P2,1,2024,purchase,279
+50,Basement family room,Game controllers (second),Kestrel,KC-2,2,2018,purchase,74
+51,Storage room,Plastic storage bins,,,3,2022,purchase,23
+52,Laundry room,Cordless vacuum (second),Airlyn,AL-V9,1,2019,purchase,788
+53,Storage room,Wicker baskets,,,3,2025,purchase,59
+54,Basement bedroom,Winter boots,Fjellhaus,FH-WB,1,2019,purchase,218
+55,Basement bedroom,Queen mattress,Restwell,RW-Q12,1,2016,purchase,768
+56,Basement bedroom,Dress shoes (second),Carrow,,3,2022,purchase,211
+57,Basement office,27 inch monitor,Quorra,QM-27,2,2017,purchase,410
+58,Basement bedroom,Sweaters (second),,,1,2016,purchase,111
+59,Basement office,Office chair,Seatwise,SW-ERG,1,2018,purchase,361
+60,Basement office,Desktop computer (second),Quorra,QD-7,1,2023,purchase,1241
+61,Laundry room,Cordless vacuum,Airlyn,AL-V9,1,2016,purchase,818
+62,Storage room,Space heater,Lumio,LM-H1,1,2021,purchase,116
+63,Basement office,Books,,,7,2024,purchase,35
+64,Laundry room,Air purifier (second),Airlyn,AL-P2,1,2018,purchase,363
+65,Basement family room,Throw blankets,,,4,2024,purchase,84
+66,Basement family room,Ottoman (second),Brookline Home,,1,2016,purchase,173
+67,Basement bedroom,Sweaters,,,2,2021,purchase,85
+68,Laundry room,Ironing board and iron (second),Pressa,,1,2018,purchase,61
+69,Laundry room,Laundry baskets,,,1,2015,purchase,29
+70,Basement bedroom,Bedding set (second),,,2,2019,purchase,191
+71,Basement family room,55 inch television (second),Varion,VX55Q,1,2025,purchase,566
+72,Storage room,Holiday decorations (second),,,1,2016,purchase,274
+73,Storage room,Luggage set,Tavelle,TV-3PC,1,2019,purchase,624
+74,Basement family room,Area rug 8x10,Tessly,TS-810,1,2020,purchase,544
+75,Basement family room,Area rug 8x10 (second),Tessly,TS-810,1,2017,purchase,428
+76,Basement office,Printer (second),Inkwell,IW-480,1,2021,purchase,200
+77,Basement family room,Sectional sofa (second),Brookline Home,BH-SEC4,1,2022,purchase,1862
+78,Laundry room,Laundry baskets (second),,,2,2022,purchase,24
+79,Laundry room,Washer,Kelvane,KW-500,1,2016,purchase,1353
+80,Basement bedroom,"Children's toys, assorted",,,3,2019,purchase,50
+81,Basement family room,"Ankle boots, heeled",Ostrava Paris,OP-AB9,1,2022,gift,3090
+82,Basement family room,Game console,Kestrel,K5,1,2020,purchase,645
+83,Basement office,Printer,Inkwell,IW-480,1,2024,purchase,185
+84,Storage room,Camping tent,Ridgeline,RL-T4,1,2024,purchase,396
+85,Basement family room,Throw blankets (second),,,4,2014,purchase,72
+86,Basement family room,Board games (second),,,5,2018,purchase,32
+87,Storage room,Spare dishes,,,1,2024,purchase,103
+88,Basement office,Office chair (second),Seatwise,SW-ERG,1,2023,purchase,402
+89,Basement bedroom,Dresser (second),Norbeck,NB-D6,1,2019,purchase,494
+90,Basement family room,Sectional sofa,Brookline Home,BH-SEC4,1,2023,purchase,1923
+91,Laundry room,Dryer,Kelvane,KD-500,1,2022,purchase,1217
+92,Storage room,Bicycle,Pacer,PC-21,1,2024,purchase,1031
+93,Basement bedroom,Bedding set,,,1,2017,purchase,110
+94,Basement bedroom,Cashmere coat,Linden Rowe,LR-CC61,1,2021,purchase,2860

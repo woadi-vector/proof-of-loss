@@ -1,0 +1,14 @@
+doc_id,file,type,proves,lines
+D01,card_statement_2.pdf,card_statement,"ownership,value",12
+D02,gift_letter_4.pdf,gift_letter,ownership,19
+D03,gift_letter_5.pdf,gift_letter,ownership,20
+D04,gift_letter_7.pdf,gift_letter,ownership,23
+D05,card_statement_8.pdf,card_statement,"ownership,value",26
+D06,gift_letter_10.pdf,gift_letter,ownership,81
+D07,card_statement_11.pdf,card_statement,"ownership,value",94
+D08,receipt_line_4.pdf,receipt,"ownership,value",4
+D09,receipt_line_6.pdf,receipt,"ownership,value",6
+D10,receipt_line_9.pdf,receipt,"ownership,value",9
+D11,receipt_line_44.pdf,receipt,"ownership,value",44
+D12,receipt_line_60.pdf,receipt,"ownership,value",60
+D13,receipt_line_61.pdf,receipt,"ownership,value",61
