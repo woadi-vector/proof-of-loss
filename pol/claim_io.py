@@ -73,6 +73,8 @@ class ImportedLine:
     line: ScheduleLine
     acquired: str = ""    # purchase, gift, unknown, or as written
     source_row: int = 0   # row number in the file, header is row 1
+    brand: str = ""
+    model: str = ""
 
 
 @dataclass
@@ -215,7 +217,7 @@ def load_claim(path: str | Path, stated_total: float | None = None, currency: st
                          brand_model=" ".join(x for x in (brand, model) if x),
                          quantity=qty, purchase_year=int(year) if year is not None else None,
                          claimed_amount=unit),
-            acquired=acquired, source_row=r_i))
+            acquired=acquired, source_row=r_i, brand=brand, model=model))
 
     ids = [ln.line.line_id for ln in lines]
     for d in sorted({i for i in ids if ids.count(i) > 1}):
