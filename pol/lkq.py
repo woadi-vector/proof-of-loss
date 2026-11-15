@@ -48,14 +48,15 @@ def _clock(seconds: float | None) -> str:
     return f", at {m}:{s:02d} in the walk"
 
 
-def _money(x: float) -> str:
-    return f"${x:,.2f}"
+def _money(x: float, cur: str = "") -> str:
+    return f"{cur} {x:,.2f}" if cur else f"${x:,.2f}"
 
 
 def like_kind_check(line: ScheduleLine, sighting: Sighting,
                     observed_comps: list[Comparable] | None,
                     tolerance: float = LKQ_TOLERANCE,
-                    min_dollars: float = LKQ_MIN_DOLLARS) -> LKQFinding:
+                    min_dollars: float = LKQ_MIN_DOLLARS,
+                    currency: str | None = None, region: str | None = None) -> LKQFinding:
     observed = sighting.brand_model or sighting.description
     seen = f"{observed}{_clock(sighting.timestamp_s)}"
 
@@ -70,26 +71,27 @@ def like_kind_check(line: ScheduleLine, sighting: Sighting,
     if not observed:
         return none("The observed item was not identified; no like kind and quality comparison.")
 
-    pr = price_from_comps(observed_comps or [])
+    pr = price_from_comps(observed_comps or [], currency, region)
     if pr.replacement_cost is None:
         return none(f"No cited listings for the observed item ({observed}); "
                     "no like kind and quality comparison.", pr.flags)
     rcv = pr.replacement_cost
+    cur = pr.currency
     if line.claimed_amount is None:
-        return none(f"Like kind and quality for the observed item ({seen}) is {_money(rcv)}; "
+        return none(f"Like kind and quality for the observed item ({seen}) is {_money(rcv, cur)}; "
                     "the schedule gives no claimed amount to compare.", pr.flags, rcv, pr.sources)
 
     per_unit = round(line.claimed_amount - rcv, 2)
     total = round(per_unit * line.quantity, 2)
     exceeds = per_unit > rcv * tolerance and total >= min_dollars
     n = len(pr.sources)
-    text = (f"Claimed replacement {_money(line.claimed_amount)} per unit. Like kind and quality for "
-            f"the observed item ({seen}) averages {_money(rcv)} across {n} cited "
+    text = (f"Claimed replacement {_money(line.claimed_amount, cur)} per unit. Like kind and quality for "
+            f"the observed item ({seen}) averages {_money(rcv, cur)} across {n} cited "
             f"listing{'s' if n != 1 else ''}.")
     if exceeds:
-        text += f" Difference {_money(per_unit)} per unit, {_money(total)} total."
+        text += f" Difference {_money(per_unit, cur)} per unit, {_money(total, cur)} total."
     elif per_unit > 0:
-        text += f" Difference {_money(per_unit)} per unit, within tolerance."
+        text += f" Difference {_money(per_unit, cur)} per unit, within tolerance."
     else:
         text += " The claimed amount does not exceed it."
     return LKQFinding(line.line_id, observed, rcv, line.claimed_amount, per_unit, total, exceeds,

@@ -45,7 +45,8 @@ class Valuation:
 
 def value_line(line: ScheduleLine, comps: list[Comparable] | None = None,
                receipt: float | None = None, life: dict[str, float] | None = None,
-               as_of: date | None = None, age_note: str | None = None) -> Valuation:
+               as_of: date | None = None, age_note: str | None = None,
+               currency: str | None = None, region: str | None = None) -> Valuation:
     """`age_note` replaces the default "Bought <year>, per the schedule." sentence,
     for ages that come from somewhere else (an adjuster's estimate on the walk)."""
     life = life or DEFAULT_LIFE_YEARS
@@ -55,7 +56,7 @@ def value_line(line: ScheduleLine, comps: list[Comparable] | None = None,
     if receipt is not None:
         rcv, basis, sources = receipt, "receipt", []
     else:
-        pr = price_from_comps(comps or [])
+        pr = price_from_comps(comps or [], currency, region)
         rcv, basis, sources = pr.replacement_cost, pr.basis, pr.sources
         flags.extend(pr.flags if comps else [])
     if rcv is None:

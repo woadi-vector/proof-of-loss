@@ -33,6 +33,8 @@ class Comparable:
     price: float
     title: str = ""    # listing title, for like-kind-and-quality review
     retrieved: str = ""  # ISO date the price was seen
+    currency: str = ""   # ISO code as listed, e.g. "CAD"; "" when not recorded
+    region: str = ""     # market the listing sells in, e.g. "CA"; "" when not recorded
 
 
 @dataclass
@@ -42,36 +44,81 @@ class PriceResult:
     sources: list[Comparable]
     excluded: list[Comparable]
     flags: list[str]
+    currency: str = ""
 
 
 def usable(c: Comparable) -> bool:
     return bool(c.source and c.url and c.price and c.price > 0)
 
 
-def price_from_comps(comps: list[Comparable]) -> PriceResult:
+def _market_filter(good: list[Comparable], currency: str | None, region: str | None,
+                   flags: list[str]) -> tuple[list[Comparable], list[Comparable]]:
+    """Keep listings in the claim's currency and market. Never convert a price.
+
+    With no currency asked for, listings that state different currencies are
+    refused outright: averaging CAD with USD is meaningless.
+    """
+    off: list[Comparable] = []
+    if currency:
+        want = currency.upper()
+        wrong = [c for c in good if c.currency.upper() != want]
+        if wrong:
+            unstated = sum(1 for c in wrong if not c.currency)
+            other = len(wrong) - unstated
+            if other:
+                flags.append(f"{other} listing(s) in another currency set aside; prices are never converted")
+            if unstated:
+                flags.append(f"{unstated} listing(s) with no currency recorded set aside")
+        off += wrong
+        good = [c for c in good if c not in wrong]
+    else:
+        stated = {c.currency.upper() for c in good if c.currency}
+        if len(stated) > 1:
+            flags.append(f"listings mix currencies ({', '.join(sorted(stated))}); no average taken, "
+                         "and prices are never converted")
+            return [], good
+    if region:
+        want_r = region.upper()
+        wrong_r = [c for c in good if c.region.upper() != want_r]
+        if wrong_r:
+            flags.append(f"{len(wrong_r)} listing(s) from outside the {want_r} market "
+                         "(or with no market recorded) set aside")
+        off += wrong_r
+        good = [c for c in good if c not in wrong_r]
+    return good, off
+
+
+def price_from_comps(comps: list[Comparable], currency: str | None = None,
+                     region: str | None = None) -> PriceResult:
+    """Average cited listings. Pass `currency` and `region` (e.g. "CAD", "CA")
+    to keep only listings from the claim's market; nothing is ever converted."""
     good = [c for c in comps if usable(c)]
     flags: list[str] = []
     if len(good) < len(comps):
         flags.append(f"{len(comps) - len(good)} listing(s) missing source, link or price; not counted")
+    good, off_market = _market_filter(good, currency, region, flags)
     if not good:
-        return PriceResult(None, "", [], [], flags + ["no priced comparables"])
+        return PriceResult(None, "", [], off_market, flags + ["no priced comparables"], currency or "")
+    cur = (currency or next((c.currency for c in good if c.currency), "")).upper()
 
-    excluded: list[Comparable] = []
+    excluded: list[Comparable] = list(off_market)
     if len(good) >= 3:
         mid = median(c.price for c in good)
         kept = [c for c in good if OUTLIER_LOW * mid <= c.price <= OUTLIER_HIGH * mid]
-        excluded = [c for c in good if c not in kept]
+        far = [c for c in good if c not in kept]
+        excluded += far
         good = kept
-        if excluded:
-            flags.append(f"{len(excluded)} listing(s) set aside as far from the median price")
+        if far:
+            flags.append(f"{len(far)} listing(s) set aside as far from the median price")
 
     avg = round(mean(c.price for c in good), 2)
     lo, hi = min(c.price for c in good), max(c.price for c in good)
     if len(good) < MIN_COMPS:
         flags.append("thin price support: one listing")
-    span = f"${lo:,.2f}" if lo == hi else f"${lo:,.2f} to ${hi:,.2f}"
+    unit = f"{cur} " if cur else "$"
+    span = f"{unit}{lo:,.2f}" if lo == hi else f"{unit}{lo:,.2f} to {unit}{hi:,.2f}"
     basis = f"average of {len(good)} listing{'s' if len(good) != 1 else ''} ({span})"
-    return PriceResult(avg, basis, good, excluded, flags)
+    return PriceResult(avg, basis, good, excluded, flags, cur)
 
 
 def explain_depreciation(age_years: float | None, life_years: float, dep: float | None,
