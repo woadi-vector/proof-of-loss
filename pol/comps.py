@@ -240,19 +240,96 @@ def _shopping_currency(price_text: str, region: str) -> str:
     return ""
 
 
+# Stores an adjuster will accept as a new-retail price in Canada: the maker's own
+# store and established Canadian retailers. Marketplaces, resale and overseas
+# sellers are set aside (kept in the log for review). Extend per claim with a
+# stores.txt next to the lines file, one store name per line.
+TRUSTED_STORES_CA = [
+    "best buy canada", "bestbuy.ca", "walmart.ca", "walmart canada", "canadian tire", "costco",
+    "the home depot", "home depot canada", "lowe's", "rona", "staples", "london drugs", "visions",
+    "the brick", "leon's", "structube", "ikea", "wayfair", "eq3", "article", "sleep country",
+    "amazon.ca", "simons", "holt renfrew", "ssense", "harry rosen", "sporting life", "sport chek",
+    "atmosphere", "mark's", "aritzia", "sephora", "shoppers drug mart", "the source", "apple",
+    "dyson", "sony", "samsung", "lg", "celine", "louis vuitton", "saint laurent", "ysl", "dior",
+    "hermès", "hermes", "loro piana", "alo", "lululemon", "massimo dutti", "zara", "lacoste",
+    "kate spade", "ted baker", "timberland", "pajar", "cougar", "golf town", "bed bath & beyond",
+    "hudson's bay", "the bay", "nordstrom", "saks", "brandsmart", "best buy",
+]
+NOT_NEW = ("refurb", "remis à neuf", "remis a neuf", "re-certified", "recertified", "open box",
+           "pre-owned", "preowned", "used", "déstockage", "destockage", "reconditionn", "renewed")
+PARTS = ("attachment", "accessor", "replacement", "brush tool", "brush head", "filter", "spare",
+         "parts", "strap only", "dust bag", "charger", "battery", "case for", "cover for")
+MARKETPLACE = ("market", "marketplace", "ebay", "poshmark", "etsy", "aliexpress", "temu", "desertcart")
+
+
+def _trusted(source: str, stores: list[str]) -> bool:
+    s = source.lower().strip()
+    if any(m in s for m in MARKETPLACE):
+        return False
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", s) for t in stores)
+
+
+def select_shopping(data: dict, line_id: str, item: str, currency: str = "CAD", region: str = "CA",
+                    max_keep: int = 5, must: list[str] | None = None, stores: list[str] | None = None,
+                    today: date | None = None, search_note: str = "") -> FindResult:
+    """Choose comparables from one Google Shopping answer. Kept: new items from a
+    trusted store whose title has every required word, priced as shown. Every
+    other result is set aside with its reason, never edited."""
+    today = today or date.today()
+    stores = [x.lower() for x in (stores or TRUSTED_STORES_CA)]
+    must = [w.lower() for w in (must or []) if w.strip()]
+    res = FindResult(line_id, item, [], [], search_note, [item])
+    seen: set = set()
+    for r in data.get("shopping_results", []) or []:
+        price = r.get("extracted_price")
+        url = r.get("link") or r.get("product_link") or ""
+        title = str(r.get("title", "")).strip()
+        p = Proposed(str(r.get("source", "")).strip(), url, title,
+                     float(price) if isinstance(price, (int, float)) else 0.0,
+                     _shopping_currency(str(r.get("price", "")), region))
+        t = title.lower()
+        if not p.source or not p.url or p.price <= 0:
+            why = "missing store, link or price"
+        elif r.get("second_hand_condition") or any(w in t for w in NOT_NEW):
+            why = f"not new ({r.get('second_hand_condition') or 'title says so'})"
+        elif any(w in t for w in PARTS):
+            why = "a part or accessory, not the item"
+        elif must and not all(w in t for w in must):
+            why = f"title lacks: {', '.join(w for w in must if w not in t)}"
+        elif not _trusted(p.source, stores):
+            why = "store not on the trusted list (marketplace, resale or unknown seller)"
+        elif (p.source.lower(), round(p.price, 2)) in seen:
+            why = "same store and price listed twice"
+        elif len(res.kept) >= max_keep:
+            why = f"beyond the first {max_keep} kept"
+        else:
+            why = ""
+        if why:
+            res.dropped.append(Dropped(p, why))
+            continue
+        seen.add((p.source.lower(), round(p.price, 2)))
+        note = "price as shown on Google Shopping " + region.upper()
+        if search_note:
+            note += f"; {search_note}"
+        res.kept.append(Comparable(source=p.source, url=p.url, price=round(p.price, 2), title=title,
+                                   retrieved=today.isoformat(), currency=p.currency,
+                                   region=region.upper(), note=note))
+    return res
+
+
 def find_shopping(line_id: str, item: str, get_json: Callable[[dict], dict], currency: str = "CAD",
                   region: str = "CA", max_keep: int = 5, snapshot_dir: Path | None = None,
-                  today: date | None = None, search_note: str = "") -> FindResult:
-    """One Google Shopping search. Keeps new-condition results with a store and a
-    price, exactly as Google showed them; saves the whole raw answer with its SHA-256
-    as the backup. Used and resale listings are set aside."""
+                  today: date | None = None, search_note: str = "", must: list[str] | None = None,
+                  stores: list[str] | None = None) -> FindResult:
+    """One Google Shopping search, saved whole with its SHA-256 as the backup, then
+    select_shopping picks the comparables."""
     today = today or date.today()
     params = {"engine": "google_shopping", "q": item, "gl": region.lower(), "hl": "en",
               "google_domain": "google.ca" if region.upper() == "CA" else "google.com"}
     data = get_json(params)
     if data.get("error"):
         raise RuntimeError(f"SerpApi: {data['error']}")
-    res = FindResult(line_id, item, [], [], search_note, [item])
+    res = select_shopping(data, line_id, item, currency, region, max_keep, must, stores, today, search_note)
     raw = json.dumps(data, sort_keys=True).encode("utf-8")
     sha = hashlib.sha256(raw).hexdigest()
     if snapshot_dir is not None:
@@ -263,33 +340,6 @@ def find_shopping(line_id: str, item: str, get_json: Callable[[dict], dict], cur
         res.snapshots.append({"line": line_id, "file": name, "sha256": sha, "retrieved": today.isoformat(),
                               "search_id": meta.get("id", ""),
                               "google_url": meta.get("google_shopping_url", "")})
-    seen: set[str] = set()
-    for r in data.get("shopping_results", []) or []:
-        price = r.get("extracted_price")
-        url = r.get("link") or r.get("product_link") or ""
-        p = Proposed(str(r.get("source", "")).strip(), url, str(r.get("title", "")).strip(),
-                     float(price) if isinstance(price, (int, float)) else 0.0,
-                     _shopping_currency(str(r.get("price", "")), region))
-        if r.get("second_hand_condition"):
-            res.dropped.append(Dropped(p, f"used or resale ({r['second_hand_condition']})"))
-            continue
-        if not p.source or not p.url or p.price <= 0:
-            res.dropped.append(Dropped(p, "missing store, link or price"))
-            continue
-        key = (p.source.lower(), round(p.price, 2))
-        if key in seen:
-            res.dropped.append(Dropped(p, "same store and price listed twice"))
-            continue
-        if len(res.kept) >= max_keep:
-            res.dropped.append(Dropped(p, f"beyond the first {max_keep} results"))
-            continue
-        seen.add(key)
-        note = "price as shown on Google Shopping " + region.upper()
-        if search_note:
-            note += f"; {search_note}"
-        res.kept.append(Comparable(source=p.source, url=p.url, price=round(p.price, 2), title=p.title,
-                                   retrieved=today.isoformat(), currency=p.currency,
-                                   region=region.upper(), note=note))
     return res
 
 

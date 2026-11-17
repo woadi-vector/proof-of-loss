@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from pol.claim_io import load_claim  # noqa: E402
-from pol.comps import find_comps, find_shopping, serpapi_get, serpapi_key  # noqa: E402
+from pol.comps import TRUSTED_STORES_CA, find_comps, find_shopping, select_shopping, serpapi_get, serpapi_key  # noqa: E402
 from pol.providers import GoogleProvider, Ledger  # noqa: E402
 
 COLS = ["line", "source", "url", "price", "currency", "region", "title", "retrieved", "note"]
@@ -37,6 +37,8 @@ def main() -> None:
     ap.add_argument("--source", choices=["shopping", "gemini"], default="shopping",
                     help="shopping: Google Shopping through SerpApi (SERPAPI_KEY in .env); "
                          "gemini: Gemini with web search, then each page is opened and checked")
+    ap.add_argument("--replay", action="store_true",
+                    help="re-choose listings from the saved Google Shopping answers; no new searches")
     ap.add_argument("--redo", action="store_true", help="search the --lines again even if already done")
     ap.add_argument("--dump", action="store_true", help="save the raw model answers to comps_raw/ for diagnosis")
     ap.add_argument("--currency", default="CAD")
@@ -53,18 +55,21 @@ def main() -> None:
         if path.exists():
             done |= {json.loads(x)["line"] for x in path.read_text(encoding="utf-8").splitlines() if x.strip()}
     want = {x.strip() for x in a.only.split(",")} if a.only else None
+    if a.replay:
+        done = set()
     if a.redo and want:
         done -= want
-        if a.out.exists():  # drop the old listings for redone lines so they are not doubled
-            with open(a.out, newline="", encoding="utf-8") as f:
-                keep = [r for r in csv.DictReader(f) if r["line"] not in want]
-            with open(a.out, "w", newline="", encoding="utf-8") as f:
-                w0 = csv.DictWriter(f, fieldnames=COLS)
-                w0.writeheader()
-                w0.writerows({k: r.get(k, "") for k in COLS} for r in keep)
     todo = [il for il in claim.lines if (want is None or il.line.line_id in want) and il.line.line_id not in done]
     if a.limit:
         todo = todo[:a.limit]
+    if (a.replay or a.redo) and a.out.exists():  # replace, never double, the listings of lines redone
+        redo_ids = {il.line.line_id for il in todo}
+        with open(a.out, newline="", encoding="utf-8") as f:
+            keep_rows = [r for r in csv.DictReader(f) if r["line"] not in redo_ids]
+        with open(a.out, "w", newline="", encoding="utf-8") as f:
+            w0 = csv.DictWriter(f, fieldnames=COLS)
+            w0.writeheader()
+            w0.writerows({k: r.get(k, "") for k in COLS} for r in keep_rows)
     if not todo:
         print("nothing to do: every requested line is already in", a.out)
         return
@@ -72,12 +77,20 @@ def main() -> None:
     # Optional per-line search text: a "search" column in the lines file overrides the
     # item text (for example a model identified from the photos), and is noted on each listing.
     search_for: dict[str, str] = {}
+    must_for: dict[str, list[str]] = {}
     with open(a.lines, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
+            lid = str(row.get("line", "")).strip()
             if (row.get("search") or "").strip():
-                search_for[str(row.get("line", "")).strip()] = row["search"].strip()
+                search_for[lid] = row["search"].strip()
+            if (row.get("must") or "").strip():
+                must_for[lid] = row["must"].split()
+    stores = list(TRUSTED_STORES_CA)
+    extra = a.lines.parent / "stores.txt"
+    if extra.exists():
+        stores += [x.strip().lower() for x in extra.read_text(encoding="utf-8").splitlines() if x.strip()]
 
-    if a.source == "shopping":
+    if a.source == "shopping" and not a.replay:
         key = serpapi_key()
         if not key:
             sys.exit("SERPAPI_KEY is not set. Add SERPAPI_KEY=<your key> to .env.")
@@ -101,9 +114,17 @@ def main() -> None:
                 item = search_for[ln.line_id]
                 note = f"searched as '{item}'"
             try:
-                if a.source == "shopping":
+                if a.replay:
+                    saved = sorted(snaps.glob(f"line{ln.line_id}_shopping_*.json"), key=lambda q: q.stat().st_mtime)
+                    if not saved:
+                        print(f"line {ln.line_id}: no saved search to replay")
+                        continue
+                    data = json.loads(saved[-1].read_text(encoding="utf-8"))
+                    r = select_shopping(data, ln.line_id, item, a.currency, a.region,
+                                        must=must_for.get(ln.line_id), stores=stores, search_note=note)
+                elif a.source == "shopping":
                     r = find_shopping(ln.line_id, item, get, a.currency, a.region, snapshot_dir=snaps,
-                                      search_note=note)
+                                      search_note=note, must=must_for.get(ln.line_id), stores=stores)
                 else:
                     r = find_comps(ln.line_id, item, provider, ledger, a.currency, a.region, snapshot_dir=snaps)
             except Exception as e:  # one bad line should not stop the run
