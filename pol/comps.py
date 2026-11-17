@@ -271,13 +271,15 @@ def _trusted(source: str, stores: list[str]) -> bool:
 
 def select_shopping(data: dict, line_id: str, item: str, currency: str = "CAD", region: str = "CA",
                     max_keep: int = 5, must: list[str] | None = None, stores: list[str] | None = None,
-                    today: date | None = None, search_note: str = "") -> FindResult:
+                    today: date | None = None, search_note: str = "",
+                    exclude: list[str] | None = None) -> FindResult:
     """Choose comparables from one Google Shopping answer. Kept: new items from a
     trusted store whose title has every required word, priced as shown. Every
     other result is set aside with its reason, never edited."""
     today = today or date.today()
     stores = [x.lower() for x in (stores or TRUSTED_STORES_CA)]
     must = [w.lower() for w in (must or []) if w.strip()]
+    exclude = [w.lower() for w in (exclude or []) if w.strip()]
     res = FindResult(line_id, item, [], [], search_note, [item])
     seen: set = set()
     for r in data.get("shopping_results", []) or []:
@@ -294,6 +296,8 @@ def select_shopping(data: dict, line_id: str, item: str, currency: str = "CAD", 
             why = f"not new ({r.get('second_hand_condition') or 'title says so'})"
         elif any(w in t for w in PARTS):
             why = "a part or accessory, not the item"
+        elif exclude and any(w in t for w in exclude):
+            why = f"title has an excluded word: {', '.join(w for w in exclude if w in t)}"
         elif must and not all(w in t for w in must):
             why = f"title lacks: {', '.join(w for w in must if w not in t)}"
         elif not _trusted(p.source, stores):
@@ -320,7 +324,7 @@ def select_shopping(data: dict, line_id: str, item: str, currency: str = "CAD", 
 def find_shopping(line_id: str, item: str, get_json: Callable[[dict], dict], currency: str = "CAD",
                   region: str = "CA", max_keep: int = 5, snapshot_dir: Path | None = None,
                   today: date | None = None, search_note: str = "", must: list[str] | None = None,
-                  stores: list[str] | None = None) -> FindResult:
+                  stores: list[str] | None = None, exclude: list[str] | None = None) -> FindResult:
     """One Google Shopping search, saved whole with its SHA-256 as the backup, then
     select_shopping picks the comparables."""
     today = today or date.today()
@@ -329,7 +333,8 @@ def find_shopping(line_id: str, item: str, get_json: Callable[[dict], dict], cur
     data = get_json(params)
     if data.get("error"):
         raise RuntimeError(f"SerpApi: {data['error']}")
-    res = select_shopping(data, line_id, item, currency, region, max_keep, must, stores, today, search_note)
+    res = select_shopping(data, line_id, item, currency, region, max_keep, must, stores, today, search_note,
+                          exclude)
     raw = json.dumps(data, sort_keys=True).encode("utf-8")
     sha = hashlib.sha256(raw).hexdigest()
     if snapshot_dir is not None:

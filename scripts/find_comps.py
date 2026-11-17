@@ -83,6 +83,7 @@ def main() -> None:
     # item text (for example a model identified from the photos), and is noted on each listing.
     search_for: dict[str, str] = {}
     must_for: dict[str, list[str]] = {}
+    exclude_for: dict[str, list[str]] = {}
     with open(a.lines, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             lid = str(row.get("line", "")).strip()
@@ -90,6 +91,8 @@ def main() -> None:
                 search_for[lid] = row["search"].strip()
             if (row.get("must") or "").strip():
                 must_for[lid] = row["must"].split()
+            if (row.get("exclude") or "").strip():
+                exclude_for[lid] = row["exclude"].split()
     stores = list(TRUSTED_STORES_CA)
     extra = a.lines.parent / "stores.txt"
     if extra.exists():
@@ -126,10 +129,12 @@ def main() -> None:
                         continue
                     data = json.loads(saved[-1].read_text(encoding="utf-8"))
                     r = select_shopping(data, ln.line_id, item, a.currency, a.region,
-                                        must=must_for.get(ln.line_id), stores=stores, search_note=note)
+                                        must=must_for.get(ln.line_id), stores=stores, search_note=note,
+                                        exclude=exclude_for.get(ln.line_id))
                 elif a.source == "shopping":
                     r = find_shopping(ln.line_id, item, get, a.currency, a.region, snapshot_dir=snaps,
-                                      search_note=note, must=must_for.get(ln.line_id), stores=stores)
+                                      search_note=note, must=must_for.get(ln.line_id), stores=stores,
+                                      exclude=exclude_for.get(ln.line_id))
                 else:
                     r = find_comps(ln.line_id, item, provider, ledger, a.currency, a.region, snapshot_dir=snaps)
             except Exception as e:  # one bad line should not stop the run
