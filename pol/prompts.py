@@ -1,15 +1,16 @@
 """What to ask SAM 3.1 to look for.
 
 Each claim category gets a few phrasings, because one word misses things: on
-the first live photo, "side table" found nothing beside a TV stand that has
-one. Every phrasing costs one SAM call per photo, so lists stay short.
+the first live photo, "side table", "end table" and "nightstand" all found
+nothing beside a TV stand that has one; "small table" found it at 0.75 ("table"
+and "accent table" did not). Every phrasing costs one SAM call per photo, so lists stay short.
 Detections from different phrasings of the same object collapse in merge.
 """
 
 CATEGORIES: dict[str, list[str]] = {
     "television": ["television"],
     "tv stand": ["tv stand", "media console"],
-    "side table": ["side table", "end table", "nightstand"],
+    "side table": ["side table", "end table", "nightstand", "small table"],
     "soundbar": ["soundbar"],
     "speaker": ["speaker"],
     "couch": ["couch", "sofa"],
