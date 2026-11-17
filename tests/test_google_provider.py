@@ -32,7 +32,7 @@ def usage(prompt, out, audio=0, thoughts=0):
 
 def provider(answers):
     models = FakeModels(answers)
-    p = GoogleProvider(project="test", location="us-central1", model="gemini-2.5-flash",
+    p = GoogleProvider(project="test", location="global", model="gemini-3.8-flash",
                        client=NS(models=models))
     p.price_in, p.price_audio_in, p.price_out = 0.30, 1.00, 2.50
     return p, models
