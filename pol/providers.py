@@ -312,6 +312,7 @@ class GoogleProvider:
         self.thinking = cfg["thinking"].strip().upper()
         self.name = f"google:{self.model}"
         self._client = client
+        self.dump_dir: Path | None = None
 
     @property
     def client(self):
@@ -465,5 +466,10 @@ class GoogleProvider:
                     web = getattr(ch, "web", None)
                     if web and web.uri:
                         cited.append(web.uri)
+        if self.dump_dir is not None:  # raw answer, to see what grounding Google returned
+            self.dump_dir.mkdir(parents=True, exist_ok=True)
+            n = len(list(self.dump_dir.glob("*.json"))) + 1
+            (self.dump_dir / f"answer_{n:03d}.json").write_text(
+                resp.model_dump_json(indent=1, exclude_none=True), encoding="utf-8")
         assumptions, listings = parse_answer(resp.text or "")
         return SearchAnswer(assumptions, listings, cited, queries)
