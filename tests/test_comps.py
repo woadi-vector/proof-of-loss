@@ -113,8 +113,8 @@ def test_shopping_keeps_new_listings_as_shown_and_saves_the_raw_answer(tmp_path)
                                                                   ("Dyson", 1049.99, "CAD")]
     assert r.kept[1].url == "https://www.dysoncanada.ca/v15", "a direct store link wins over Google's page"
     assert "Google Shopping CA" in r.kept[0].note and "searched as" in r.kept[0].note
-    assert sorted(d.reason for d in r.dropped) == ["missing store, link or price",
-                                                   "same store and price listed twice", "used or resale (used)"]
+    assert sorted(d.reason for d in r.dropped) == ["missing store, link or price", "not new (used)",
+                                                   "same store and price listed twice"]
     snap = r.snapshots[0]
     assert snap["search_id"] == "abc" and (tmp_path / snap["file"]).exists()
     assert price_from_comps(r.kept, "CAD", "CA").replacement_cost == 1024.99
@@ -126,3 +126,39 @@ def test_shopping_error_is_raised_not_guessed():
     from pol.comps import find_shopping
     with pytest.raises(RuntimeError, match="Invalid API key"):
         find_shopping("1", "x", lambda p: {"error": "Invalid API key"})
+
+
+def test_selection_keeps_trusted_new_matching_listings_only():
+    from pol.comps import select_shopping
+    data = {"shopping_results": [
+        {"title": "CELINE Big Luggage In Grained Calfskin", "source": "CELINE", "price": "$6,300.00",
+         "extracted_price": 6300.0, "product_link": "https://g/1"},
+        {"title": "Celine Mini Luggage Tote", "source": "Bessette", "price": "$3,754.00",
+         "extracted_price": 3754.0, "product_link": "https://g/2"},
+        {"title": "Celine Micro Luggage Tote", "source": "Poshmark Canada", "price": "$1,525.00",
+         "extracted_price": 1525.0, "product_link": "https://g/3", "second_hand_condition": "pre-owned"},
+        {"title": "Celine Triomphe Cabas", "source": "CELINE", "price": "$3,250.00",
+         "extracted_price": 3250.0, "product_link": "https://g/4"},
+        {"title": "Dyson V15 Detect - Remis à neuf", "source": "Walmart.ca", "price": "$699.99",
+         "extracted_price": 699.99, "product_link": "https://g/5"},
+        {"title": "Celine Luggage replacement strap only", "source": "CELINE", "price": "$400.00",
+         "extracted_price": 400.0, "product_link": "https://g/6"},
+        {"title": "Celine Luggage", "source": "Best Buy Canada Marketplace", "price": "$5,000.00",
+         "extracted_price": 5000.0, "product_link": "https://g/7"},
+    ]}
+    r = select_shopping(data, "59", "Celine Luggage tote", must=["luggage"])
+    assert [(c.source, c.price) for c in r.kept] == [("CELINE", 6300.0)]
+    reasons = {d.listing.product if hasattr(d.listing, "product") else d.listing.url: d.reason for d in r.dropped}
+    assert reasons["https://g/2"].startswith("store not on the trusted list")
+    assert reasons["https://g/3"].startswith("not new")
+    assert reasons["https://g/4"] == "title lacks: luggage"
+    assert reasons["https://g/5"].startswith("not new")
+    assert reasons["https://g/6"] == "a part or accessory, not the item"
+    assert reasons["https://g/7"].startswith("store not on the trusted list")
+
+
+def test_store_names_match_as_words():
+    from pol.comps import _trusted
+    assert _trusted("Best Buy Canada", ["best buy canada"])
+    assert not _trusted("Halo Boutique", ["alo"])
+    assert not _trusted("Bulgari", ["lg"])
