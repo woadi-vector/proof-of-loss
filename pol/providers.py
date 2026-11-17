@@ -233,7 +233,8 @@ def google_settings() -> dict[str, str]:
             "model": get("GOOGLE_MODEL", "gemini-3.8-flash"),
             "price_in": get("GOOGLE_PRICE_IN_PER_M", "0.75"),
             "price_audio_in": get("GOOGLE_PRICE_AUDIO_IN_PER_M", "0.75"),
-            "price_out": get("GOOGLE_PRICE_OUT_PER_M", "3.75")}
+            "price_out": get("GOOGLE_PRICE_OUT_PER_M", "3.75"),
+            "thinking": get("GOOGLE_THINKING", "LOW")}
 
 
 INLINE_LIMIT = 15 * 1024 * 1024        # Vertex caps an inline request near 20 MB
@@ -305,6 +306,10 @@ class GoogleProvider:
         self.price_in = float(cfg["price_in"])
         self.price_audio_in = float(cfg["price_audio_in"])
         self.price_out = float(cfg["price_out"])
+        # Thinking tokens bill as output. These are structured reads, not
+        # reasoning tasks, so LOW by default; set GOOGLE_THINKING to MINIMAL,
+        # MEDIUM or HIGH in .env, or to DEFAULT to leave the model's own setting.
+        self.thinking = cfg["thinking"].strip().upper()
         self.name = f"google:{self.model}"
         self._client = client
 
@@ -323,8 +328,11 @@ class GoogleProvider:
 
     def _call(self, kind: str, contents: list, schema: dict, ledger: Ledger) -> dict:
         from google.genai import types
+        extra = {}
+        if self.thinking and self.thinking != "DEFAULT":
+            extra["thinking_config"] = types.ThinkingConfig(thinking_level=self.thinking)
         cfg = types.GenerateContentConfig(response_mime_type="application/json",
-                                          response_json_schema=schema, temperature=0)
+                                          response_json_schema=schema, temperature=0, **extra)
         t = time.perf_counter()
         resp = self.client.models.generate_content(model=self.model, contents=contents,
                                                    config=cfg)
