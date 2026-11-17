@@ -438,3 +438,32 @@ class GoogleProvider:
         d = self._call("frame", [img, prompt], schema, ledger)
         return FrameCheck(_yes_no(d.get("clear")), _yes_no(d.get("shows_item")),
                           str(d.get("note", "")).strip())
+
+    # listings for pricing (pol/comps.py decides what is kept) ------------------
+
+    def find_listings(self, item: str, currency: str, region: str, ledger: Ledger):
+        """One grounded search call. Returns what the model proposed plus the
+        pages Google's search actually returned, so code can drop anything uncited."""
+        from google.genai import types
+
+        from .comps import LISTINGS_PROMPT, SearchAnswer, parse_answer
+        extra = {}
+        if self.thinking and self.thinking != "DEFAULT":
+            extra["thinking_config"] = types.ThinkingConfig(thinking_level=self.thinking)
+        cfg = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())],
+                                          temperature=0, **extra)
+        prompt = LISTINGS_PROMPT.format(item=item, currency=currency, region=region)
+        t = time.perf_counter()
+        resp = self.client.models.generate_content(model=self.model, contents=[prompt], config=cfg)
+        ledger.add(self._record("comps", resp, time.perf_counter() - t))
+        cited, queries = [], []
+        for cand in (getattr(resp, "candidates", None) or [])[:1]:
+            gm = getattr(cand, "grounding_metadata", None)
+            if gm:
+                queries = list(gm.web_search_queries or [])
+                for ch in gm.grounding_chunks or []:
+                    web = getattr(ch, "web", None)
+                    if web and web.uri:
+                        cited.append(web.uri)
+        assumptions, listings = parse_answer(resp.text or "")
+        return SearchAnswer(assumptions, listings, cited, queries)

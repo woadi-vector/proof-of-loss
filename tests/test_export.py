@@ -49,12 +49,13 @@ def test_rows_follow_the_layout(tmp_path):
     assert len(wb.documents) == 13 + 58 and all(len(r) == len(DOCUMENT_COLUMNS) for r in wb.documents)
     row = wb.inventory[0]
     assert row[9] == 1050.0, "the USD listing is set aside; the two CAD listings average 1,050"
-    assert row[10] == "https://example.com/a\nhttps://example.com/b"
-    assert "another currency set aside" in row[15]
+    assert "https://example.com/a" in row[11] and "https://example.com/b" in row[11]
+    assert row[10] == round(row[7] - 1050.0, 2)
+    assert "another currency set aside" in row[16]
     missing_qty = next(r for r in wb.inventory if r[0] == str(e["missingQtyLine"]))
-    assert "no quantity given" in missing_qty[15]
-    gift = next(r for r in wb.inventory if r[15].endswith("gift"))
-    assert gift[14] == "partial"
+    assert "no quantity given" in missing_qty[16]
+    gift = next(r for r in wb.inventory if r[16].endswith("gift"))
+    assert gift[15] == "partial"
 
 
 def test_summary_carries_the_gap(tmp_path):
@@ -76,7 +77,7 @@ def test_xlsx_and_csv_written(tmp_path):
     assert [c.value for c in inv[1]] == INVENTORY_COLUMNS
     assert inv.max_row == 96, "header, 94 lines, totals row"
     assert inv.cell(96, 9).value == "=SUM(I2:I95)"
-    assert inv.cell(2, 15).fill.fgColor.rgb.endswith(("C6EFCE", "FFEB9C", "FFC7CE"))
+    assert inv.cell(2, 16).fill.fgColor.rgb.endswith(("C6EFCE", "FFEB9C", "FFC7CE"))
     with open(paths[0], newline="", encoding="utf-8") as f:
         assert len(list(csv.reader(f))) == 95
 

@@ -110,3 +110,19 @@ def test_missing_project_says_what_to_set(monkeypatch):
     p.project = ""
     with pytest.raises(RuntimeError, match="GOOGLE_CLOUD_PROJECT"):
         _ = p.client
+
+
+def test_find_listings_returns_grounding_sources():
+    body = '{"assumptions": "", "listings": [{"source": "S", "url": "https://s.ca/x", "title": "T", ' \
+           '"price": 99, "currency": "CAD"}]}'
+    gm = NS(web_search_queries=["q1", "q2"],
+            grounding_chunks=[NS(web=NS(uri="https://redirect/1")), NS(web=None)])
+    resp = NS(text=body, usage_metadata=usage(200, 50), candidates=[NS(grounding_metadata=gm)])
+    models = NS(calls=[])
+    models.generate_content = lambda model, contents, config: (models.calls.append(config), resp)[1]
+    p = GoogleProvider(project="test", location="global", model="gemini-3.8-flash", client=NS(models=models))
+    led = Ledger()
+    ans = p.find_listings("Celine tote", "CAD", "CA", led)
+    assert ans.cited == ["https://redirect/1"] and ans.queries == ["q1", "q2"]
+    assert ans.listings[0].url == "https://s.ca/x" and led.calls[0].kind == "comps"
+    assert models.calls[0].tools[0].google_search is not None
