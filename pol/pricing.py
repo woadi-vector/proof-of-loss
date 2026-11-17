@@ -35,6 +35,7 @@ class Comparable:
     retrieved: str = ""  # ISO date the price was seen
     currency: str = ""   # ISO code as listed, e.g. "CAD"; "" when not recorded
     region: str = ""     # market the listing sells in, e.g. "CA"; "" when not recorded
+    note: str = ""       # what a reviewer should know, e.g. price not confirmed on the page
 
 
 @dataclass

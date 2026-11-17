@@ -6,8 +6,10 @@ Sheets:
   * Documents: every photo and document, what it proves, and its lines
 
 Inventory columns: Line, Room, Item, Brand, Model, Qty, Age, Claimed each,
-Claimed total, Replacement cost each, Source links, Photo numbers, Ownership
-document, Value document, Status, Notes.
+Claimed total, Replacement cost each, Claimed minus replacement each, Source
+links (store, price, link, and any check note), Photo numbers, Ownership
+document, Value document, Status, Notes. Replacement cost only: actual cash
+value and depreciation are the carrier's to apply.
 
 Rules:
   * replacement cost appears only with its cited listings; the average is
@@ -30,7 +32,8 @@ from .pricing import Comparable, PriceResult, price_from_comps
 from .support import SupportResult, support_totals
 
 INVENTORY_COLUMNS = ["Line", "Room", "Item", "Brand", "Model", "Qty", "Age (years)", "Claimed each",
-                     "Claimed total", "Replacement cost each", "Source links", "Photo numbers",
+                     "Claimed total", "Replacement cost each", "Claimed minus replacement, each",
+                     "Source links", "Photo numbers",
                      "Ownership document", "Value document", "Status", "Notes"]
 DOCUMENT_COLUMNS = ["Ref", "Kind", "File or report", "Type", "Proves", "Lines", "SHA-256", "Note"]
 
@@ -48,7 +51,8 @@ def load_comps(path: str | Path) -> dict[str, list[Comparable]]:
             out.setdefault(lid, []).append(Comparable(
                 source=(row.get("source") or "").strip(), url=(row.get("url") or "").strip(), price=price,
                 title=(row.get("title") or "").strip(), retrieved=(row.get("retrieved") or "").strip(),
-                currency=(row.get("currency") or "").strip().upper(), region=(row.get("region") or "").strip().upper()))
+                currency=(row.get("currency") or "").strip().upper(), region=(row.get("region") or "").strip().upper(),
+                note=(row.get("note") or "").strip()))
     return out
 
 
@@ -94,7 +98,10 @@ def build_rows(claim: ImportResult, reg: EvidenceRegister, support: list[Support
             ln.line_id, ln.room, ln.description, il.brand, il.model, ln.quantity, age,
             ln.claimed_amount if ln.claimed_amount is not None else "", claimed_total,
             pr.replacement_cost if pr and pr.replacement_cost is not None else "",
-            "\n".join(c.url for c in pr.sources) if pr else "",
+            round(ln.claimed_amount - pr.replacement_cost, 2)
+            if pr and pr.replacement_cost is not None and ln.claimed_amount is not None else "",
+            "\n".join(f"{c.source}: {c.price:,.2f} {c.currency} {c.url}" + (f" ({c.note})" if c.note else "")
+                      for c in pr.sources) if pr else "",
             ", ".join(f"{p.report} #{p.photo}" for p in photos),
             ", ".join(s.ownership) if s else "", ", ".join(s.value) if s else "",
             s.status if s else "", "; ".join(notes)])
@@ -171,16 +178,16 @@ def write_xlsx(wb: Workbook, path: Path, currency: str = "CAD") -> Path:
     for c in inv[1]:
         c.font = Font(bold=True)
     for r in range(2, n + 2):
-        st = inv.cell(r, 15).value
+        st = inv.cell(r, 16).value
         if st in fills:
-            inv.cell(r, 15).fill = PatternFill("solid", fgColor=fills[st])
-        for col in (8, 9, 10):
+            inv.cell(r, 16).fill = PatternFill("solid", fgColor=fills[st])
+        for col in (8, 9, 10, 11):
             inv.cell(r, col).number_format = '#,##0.00'
-        for col in (11, 16):
+        for col in (12, 17):
             inv.cell(r, col).alignment = Alignment(wrap_text=True, vertical="top")
     inv.cell(n + 2, 1).font = Font(bold=True)
     inv.cell(n + 2, 9).number_format = '#,##0.00'
-    widths = [6, 18, 30, 16, 14, 5, 8, 12, 12, 14, 40, 26, 16, 16, 12, 60]
+    widths = [6, 18, 30, 16, 14, 5, 8, 12, 12, 14, 14, 60, 26, 16, 16, 12, 60]
     for i, w in enumerate(widths, 1):
         inv.column_dimensions[get_column_letter(i)].width = w
     inv.freeze_panes = "B2"
