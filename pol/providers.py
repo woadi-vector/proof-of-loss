@@ -215,7 +215,10 @@ def google_settings() -> dict[str, str]:
 
     Sign-in is Application Default Credentials (gcloud auth application-default
     login), so no key lives in .env. Prices are per million tokens and default to
-    Gemini 2.5 Flash on Vertex; set them in .env when the model changes, and
+    Gemini 3.8 Flash on the Vertex global endpoint at its introductory rate
+    ($0.75 / $3.75 through Dec 31 2026, then $1.50 / $7.50); Google lists no
+    separate audio rate for it, so audio defaults to the text rate. Set them in
+    .env when the model or the year changes, and
     confirm against the Vertex pricing page. Cost in the ledger is an estimate
     from these numbers and the response's own token counts.
     """
@@ -226,11 +229,11 @@ def google_settings() -> dict[str, str]:
         return os.environ.get(k) or f.get(k) or default
 
     return {"project": get("GOOGLE_CLOUD_PROJECT"),
-            "location": get("GOOGLE_CLOUD_LOCATION", "us-central1"),
-            "model": get("GOOGLE_MODEL", "gemini-2.5-flash"),
-            "price_in": get("GOOGLE_PRICE_IN_PER_M", "0.30"),
-            "price_audio_in": get("GOOGLE_PRICE_AUDIO_IN_PER_M", "1.00"),
-            "price_out": get("GOOGLE_PRICE_OUT_PER_M", "2.50")}
+            "location": get("GOOGLE_CLOUD_LOCATION", "global"),
+            "model": get("GOOGLE_MODEL", "gemini-3.8-flash"),
+            "price_in": get("GOOGLE_PRICE_IN_PER_M", "0.75"),
+            "price_audio_in": get("GOOGLE_PRICE_AUDIO_IN_PER_M", "0.75"),
+            "price_out": get("GOOGLE_PRICE_OUT_PER_M", "3.75")}
 
 
 INLINE_LIMIT = 15 * 1024 * 1024        # Vertex caps an inline request near 20 MB
