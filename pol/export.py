@@ -38,12 +38,31 @@ INVENTORY_COLUMNS = ["Line", "Room", "Item", "Brand", "Model", "Qty", "Age (year
 DOCUMENT_COLUMNS = ["Ref", "Kind", "File or report", "Type", "Proves", "Lines", "SHA-256", "Note"]
 
 
-def load_comps(path: str | Path) -> dict[str, list[Comparable]]:
-    """Read hand-collected or found listings: line, source, url, price, currency, region, title, retrieved."""
+def load_review(path: str | Path) -> dict[tuple[str, str], tuple[bool, str]]:
+    """A person's decisions on found listings: line, url, use (yes/no), reason."""
+    out: dict[tuple[str, str], tuple[bool, str]] = {}
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            use = str(row.get("use") or "").strip().lower() in ("yes", "y", "1", "true")
+            out[(str(row.get("line") or "").strip(), (row.get("url") or "").strip())] = (
+                use, (row.get("reason") or "").strip())
+    return out
+
+
+def load_comps(path: str | Path, review: dict[tuple[str, str], tuple[bool, str]] | None = None
+               ) -> dict[str, list[Comparable]]:
+    """Read hand-collected or found listings: line, source, url, price, currency, region, title, retrieved.
+
+    With a review, only listings a person marked use=yes are read; a listing the review
+    does not mention is left out, so nothing unreviewed reaches the workbook."""
     out: dict[str, list[Comparable]] = {}
     with open(path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             lid = str(row.get("line") or "").strip()
+            if review is not None:
+                decision = review.get((lid, (row.get("url") or "").strip()))
+                if not decision or not decision[0]:
+                    continue
             try:
                 price = float(str(row.get("price") or "").replace(",", "").replace("$", ""))
             except ValueError:

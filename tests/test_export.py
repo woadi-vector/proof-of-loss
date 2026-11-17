@@ -89,3 +89,14 @@ def test_command_runs_end_to_end(tmp_path):
                         "--docs", str(FIX / "documents.csv"), "--stated", "73213", "--out", str(out)],
                        capture_output=True, text=True, check=True)
     assert "off by CAD 437.00" in r.stdout and (out / "claim_workbook.xlsx").exists()
+
+
+def test_review_keeps_only_listings_marked_use(tmp_path):
+    from pol.export import load_review
+    comps = tmp_path / "comps.csv"
+    comps.write_text("line,source,url,price,currency,region\n1,A,https://a,100,CAD,CA\n1,B,https://b,900,CAD,CA\n"
+                     "2,C,https://c,50,CAD,CA\n", encoding="utf-8")
+    rev = tmp_path / "review.csv"
+    rev.write_text("line,url,use,reason\n1,https://a,yes,same model\n1,https://b,no,wrong size\n", encoding="utf-8")
+    got = load_comps(comps, load_review(rev))
+    assert [c.url for c in got["1"]] == ["https://a"] and "2" not in got, "unreviewed listings stay out"

@@ -162,3 +162,15 @@ def test_store_names_match_as_words():
     assert _trusted("Best Buy Canada", ["best buy canada"])
     assert not _trusted("Halo Boutique", ["alo"])
     assert not _trusted("Bulgari", ["lg"])
+
+
+def test_exclude_words_set_a_listing_aside():
+    from pol.comps import select_shopping
+    data = {"shopping_results": [
+        {"title": "Electric Shoe Dryer", "source": "Walmart.ca", "price": "$52.00", "extracted_price": 52.0,
+         "product_link": "https://g/1"},
+        {"title": "Whirlpool 7 cu. ft. Electric Dryer", "source": "Best Buy Canada", "price": "$899.99",
+         "extracted_price": 899.99, "product_link": "https://g/2"}]}
+    r = select_shopping(data, "2", "electric dryer", must=["dryer"], exclude=["shoe"])
+    assert [c.price for c in r.kept] == [899.99]
+    assert r.dropped[0].reason == "title has an excluded word: shoe"
