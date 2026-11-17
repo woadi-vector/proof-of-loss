@@ -2,12 +2,14 @@
 
 A model with web search proposes listings; code decides what is kept:
 
-  * a listing is kept only if its page is one the search actually returned
-    (the grounding sources, followed through Google's redirect links);
-    anything else is dropped as not cited, never repaired or guessed at
-  * each kept page is fetched once, saved as a snapshot with its SHA-256,
-    and checked for the listed price; a price not found on the page is kept
-    but marked, for a person to check before it is used
+  * every proposed page is fetched; a listing is kept when its page is one the
+    search actually returned (grounding sources, followed through Google's
+    redirect links), or when the page opens now and shows the listed price.
+    A page that is neither cited nor showing the price is dropped as
+    unverified, never repaired or guessed at
+  * each kept page is saved as a snapshot with its SHA-256; a cited listing
+    whose price is not found on the page is kept but marked, for a person to
+    check before it is used
   * the model never writes the replacement cost: pol/pricing.py averages the
     kept listings, sets aside outliers and other currencies, and cites them
 
@@ -77,6 +79,7 @@ class FindResult:
     assumptions: str
     queries: list[str]
     snapshots: list[dict] = field(default_factory=list)
+    cited_pages: list[str] = field(default_factory=list)   # where the search went, after redirects
 
 
 def norm_url(u: str) -> str:
@@ -122,13 +125,17 @@ def find_comps(line_id: str, item: str, finder: ListingFinder, ledger: Ledger,
 
     # Where the search actually went: follow each grounding link to its page.
     cited: set[str] = set()
+    resolved: list[str] = []
     for u in ans.cited:
         cited.add(norm_url(u))
         pg = fetch(u) if "grounding-api-redirect" in u else None
         if pg and pg.final_url:
             cited.add(norm_url(pg.final_url))
+            resolved.append(pg.final_url)
+        else:
+            resolved.append(u)
 
-    res = FindResult(line_id, item, [], [], ans.assumptions, ans.queries)
+    res = FindResult(line_id, item, [], [], ans.assumptions, ans.queries, cited_pages=resolved)
     seen: set[str] = set()
     for p in ans.listings:
         key = norm_url(p.url) if p.url else ""
@@ -138,26 +145,32 @@ def find_comps(line_id: str, item: str, finder: ListingFinder, ledger: Ledger,
         if key in seen:
             res.dropped.append(Dropped(p, "same page listed twice"))
             continue
-        if key not in cited:
-            res.dropped.append(Dropped(p, "page was not among the search results; not cited"))
-            continue
         seen.add(key)
-
-        note = ""
+        is_cited = key in cited
         pg = fetch(p.url)
-        if pg is None or pg.status >= 400 or not pg.text:
+        opened = pg is not None and pg.status < 400 and bool(pg.text)
+        shows_price = opened and price_on_page(pg.text, p.price)
+        if not is_cited and not shows_price:
+            why = ("page not among the search results, and it could not be opened to check"
+                   if not opened else
+                   "page not among the search results, and the listed price is not on it")
+            res.dropped.append(Dropped(p, why))
+            continue
+
+        if not opened:
             note = "page could not be opened to confirm the price"
+        elif not shows_price:
+            note = "price not found on the page; check before use"
         else:
-            if snapshot_dir is not None:
-                snapshot_dir.mkdir(parents=True, exist_ok=True)
-                body = pg.text.encode("utf-8", "replace")
-                sha = hashlib.sha256(body).hexdigest()
-                name = f"line{line_id}_{len(res.kept) + 1}_{sha[:10]}.html"
-                (snapshot_dir / name).write_bytes(body)
-                res.snapshots.append({"line": line_id, "url": p.url, "file": name, "sha256": sha,
-                                      "retrieved": today.isoformat()})
-            if not price_on_page(pg.text, p.price):
-                note = "price not found on the page; check before use"
+            note = "" if is_cited else "price confirmed on the page (page found by the model, not a search result)"
+        if opened and snapshot_dir is not None:
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            body = pg.text.encode("utf-8", "replace")
+            sha = hashlib.sha256(body).hexdigest()
+            name = f"line{line_id}_{len(res.kept) + 1}_{sha[:10]}.html"
+            (snapshot_dir / name).write_bytes(body)
+            res.snapshots.append({"line": line_id, "url": p.url, "final_url": pg.final_url, "file": name,
+                                  "sha256": sha, "retrieved": today.isoformat()})
         res.kept.append(Comparable(source=p.source, url=p.url, price=round(p.price, 2), title=p.title,
                                    retrieved=today.isoformat(), currency=(p.currency or "").upper(),
                                    region=region.upper(), note=note))
