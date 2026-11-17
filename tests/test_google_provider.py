@@ -55,7 +55,9 @@ def test_transcribe_parses_segments_and_logs_audio_cost(tmp_path):
     rec = led.calls[0]
     assert rec.kind == "transcribe" and rec.input_tokens == 1100 and rec.output_tokens == 100
     assert rec.cost_usd == pytest.approx((100 * 0.30 + 1000 * 1.00 + 100 * 2.50) / 1e6)
-    assert models.calls[0][2].response_mime_type == "application/json"
+    cfg = models.calls[0][2]
+    assert cfg.response_mime_type == "application/json"
+    assert cfg.thinking_config.thinking_level.value == "LOW"
 
 
 def test_extract_notes_assigns_ids_and_keeps_only_valid_enums():
