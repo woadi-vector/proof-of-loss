@@ -89,3 +89,40 @@ def test_uncited_page_is_kept_only_when_it_shows_the_price(tmp_path):
     assert sorted(d.reason for d in r.dropped) == [
         "page not among the search results, and it could not be opened to check",
         "page not among the search results, and the listed price is not on it"]
+
+
+def test_shopping_keeps_new_listings_as_shown_and_saves_the_raw_answer(tmp_path):
+    from pol.comps import find_shopping
+    answer = {"search_metadata": {"id": "abc", "google_shopping_url": "https://www.google.ca/search?q=x"},
+              "shopping_results": [
+                  {"title": "Dyson V15 Detect", "source": "Best Buy Canada", "price": "$999.99",
+                   "extracted_price": 999.99, "product_link": "https://www.google.com/shopping/product/1?gl=ca"},
+                  {"title": "Dyson V15 Detect", "source": "Dyson", "price": "CA$1,049.99",
+                   "extracted_price": 1049.99, "link": "https://www.dysoncanada.ca/v15"},
+                  {"title": "Dyson V15 (used)", "source": "eBay", "price": "$450.00", "extracted_price": 450.0,
+                   "product_link": "https://g/2", "second_hand_condition": "used"},
+                  {"title": "Dyson V15 Detect", "source": "Best Buy Canada", "price": "$999.99",
+                   "extracted_price": 999.99, "product_link": "https://g/3"},
+                  {"title": "no price", "source": "X", "price": "", "product_link": "https://g/4"},
+              ]}
+    seen = {}
+    r = find_shopping("31", "Dyson V15 Detect", lambda p: (seen.update(p), answer)[1], snapshot_dir=tmp_path,
+                      today=date(2026, 11, 17), search_note="searched as 'Dyson V15 Detect'")
+    assert seen["gl"] == "ca" and seen["engine"] == "google_shopping"
+    assert [(c.source, c.price, c.currency) for c in r.kept] == [("Best Buy Canada", 999.99, "CAD"),
+                                                                  ("Dyson", 1049.99, "CAD")]
+    assert r.kept[1].url == "https://www.dysoncanada.ca/v15", "a direct store link wins over Google's page"
+    assert "Google Shopping CA" in r.kept[0].note and "searched as" in r.kept[0].note
+    assert sorted(d.reason for d in r.dropped) == ["missing store, link or price",
+                                                   "same store and price listed twice", "used or resale (used)"]
+    snap = r.snapshots[0]
+    assert snap["search_id"] == "abc" and (tmp_path / snap["file"]).exists()
+    assert price_from_comps(r.kept, "CAD", "CA").replacement_cost == 1024.99
+
+
+def test_shopping_error_is_raised_not_guessed():
+    import pytest
+
+    from pol.comps import find_shopping
+    with pytest.raises(RuntimeError, match="Invalid API key"):
+        find_shopping("1", "x", lambda p: {"error": "Invalid API key"})
