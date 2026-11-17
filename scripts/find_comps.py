@@ -47,13 +47,18 @@ def main() -> None:
 
     claim = load_claim(a.lines, None, a.currency)
     done = set()
-    if a.out.exists():
-        with open(a.out, newline="", encoding="utf-8") as f:
-            done = {r["line"] for r in csv.DictReader(f)}
+    # A line is done when this source has already searched it (logged), whether or not
+    # anything was kept. Entries from before the source was logged were Gemini runs.
     log_path = a.out.with_name("comps_log.jsonl")
-    for path in (log_path,):
-        if path.exists():
-            done |= {json.loads(x)["line"] for x in path.read_text(encoding="utf-8").splitlines() if x.strip()}
+    if log_path.exists():
+        for x in log_path.read_text(encoding="utf-8").splitlines():
+            if x.strip():
+                e = json.loads(x)
+                if e.get("source", "gemini") == a.source and "error" not in e:
+                    done.add(e["line"])
+    if a.source == "shopping":  # a saved Google Shopping answer also means the line was searched
+        for q in (a.out.parent / "comp_pages").glob("line*_shopping_*.json"):
+            done.add(q.name[4:].split("_", 1)[0])
     want = {x.strip() for x in a.only.split(",")} if a.only else None
     if a.replay:
         done = set()
@@ -129,7 +134,8 @@ def main() -> None:
                     r = find_comps(ln.line_id, item, provider, ledger, a.currency, a.region, snapshot_dir=snaps)
             except Exception as e:  # one bad line should not stop the run
                 print(f"line {ln.line_id} {item!r}: error {e}")
-                log.write(json.dumps({"line": ln.line_id, "item": item, "error": str(e)}) + "\n")
+                log.write(json.dumps({"line": ln.line_id, "source": a.source, "item": item,
+                                      "error": str(e)}) + "\n")
                 continue
             for c in r.kept:
                 w.writerow({"line": ln.line_id, "source": c.source, "url": c.url, "price": c.price,
@@ -137,7 +143,8 @@ def main() -> None:
                             "retrieved": c.retrieved, "note": c.note})
             f.flush()
             searches += len(r.queries)
-            log.write(json.dumps({"line": ln.line_id, "item": item, "assumptions": r.assumptions,
+            log.write(json.dumps({"line": ln.line_id, "source": a.source, "replay": a.replay,
+                                  "item": item, "assumptions": r.assumptions,
                                   "queries": r.queries, "cited_pages": r.cited_pages, "kept": len(r.kept),
                                   "dropped": [{"url": d.listing.url, "price": d.listing.price,
                                                "reason": d.reason} for d in r.dropped],
