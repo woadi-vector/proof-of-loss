@@ -55,9 +55,13 @@ Jason drives from phone or laptop through Remote Control. Run commands yourself;
 
 1. `scripts/test_sam.py <photo>`: SAM 3.1 (`sam-3.1`, Responses API, streamed) with every phrasing in `pol/prompts.py`; writes `runs/<stamp>_<photo>/items.json` and `overlay.jpg`.
 2. `scripts/build_schedule.py [--describe]`: crops each detection, reads EXIF date, dedupes within photo, optionally asks Muse Spark to name and verify each crop, merges across photos, writes `out/schedule.csv` and `out/items.json`.
-3. `tests/test_pipeline.py`: offline tests (merge, schedule, reject rule). Run after any change to `pol/`.
+   Also writes `out/rejected.json` (detections the verify step dropped).
+3. `scripts/evaluate.py --init`: label sheet `out/labels.csv` prefilled from `out/`; Jason marks `correct` yes/no, fixes `item_tag` so one object has one tag across photos, and adds a `missed` row per belonging not found. Then `scripts/evaluate.py` scores item recall (the claim number), sighting recall and precision, false and duplicate lines, merges, and cost; writes `out/evaluation.json`. Re-running `--init` keeps existing labels.
+4. `tests/test_pipeline.py`: offline tests (merge, schedule, reject rule, evaluation, cost). Run after any change to `pol/`.
 
-Modules: `pol/api.py` (Meta client), `pol/prompts.py`, `pol/photos.py`, `pol/merge.py`, `pol/describe.py`, `pol/schedule.py`, `pol/model.py`.
+Every API call appends to `runs/usage.jsonl` (model, photo, usage, dollar cost from `PRICES` in `pol/api.py`).
+
+Modules: `pol/api.py` (Meta client, usage log), `pol/prompts.py`, `pol/photos.py`, `pol/merge.py`, `pol/describe.py`, `pol/schedule.py`, `pol/model.py`, `pol/evaluate.py`.
 
 ## Rules enforced in code (do not weaken)
 
@@ -74,14 +78,15 @@ Modules: `pol/api.py` (Meta client), `pol/prompts.py`, `pol/photos.py`, `pol/mer
 
 * First live SAM run on `tv.jpg` (Oct 28): television 0.96, soundbar 0.86, lamp 0.69 (partly out of frame), couch 0 (correct negative), tv stand 0.79 correct plus a false 0.58 "tv stand" that was the TV's own pedestal foot; "side table" missed the side table. Led to category synonyms and the Muse Spark verify step.
 * Full pipeline on `tv.jpg` (Oct 28, all 20 phrasings, then `--describe`): `muse-spark-1.1` works as the model id, so no `MUSE_MODEL` needed. Muse Spark named all 4 kept items (TV, soundbar, barn-door TV stand, floor lamp) and the reject rule dropped the 0.58 pedestal foot ("black plastic TV leg", not standalone). "speaker" 0.53 hit the soundbar's exact box and collapsed into it. Side table still missed by "side table", "end table" and "nightstand". The lamp crop is 36 px wide, yet Muse described it in detail; treat descriptions of tiny crops as weak.
-* Cost per photo, about $0.08: SAM 3.1 is 20 calls, one image each (about $0.05 at a reported $2.50 per 1,000 images); Muse Spark is 5 calls, 3,240 input tokens (2,927 cached) and 6,273 output (about $0.03 at $1.25 / $0.15 cached / $4.25 per M). 94% of Muse output is reasoning tokens. Prices are from press reports, not Meta's pricing page; confirm in the dashboard. `pol/api.py respond()` discards the `usage` block, so cost is not logged by the pipeline itself.
+* Cost per photo, about $0.08: SAM 3.1 is 20 calls, one image each (about $0.05 at a reported $2.50 per 1,000 images); Muse Spark is 5 calls, 3,240 input tokens (2,927 cached) and 6,273 output (about $0.03 at $1.25 / $0.15 cached / $4.25 per M). 94% of Muse output is reasoning tokens. Prices are from press reports, not Meta's pricing page; confirm in the dashboard. With "small table" added, SAM is 21 calls per photo.
+* Side table fix (Oct 28): "small table" found it at 0.75 with a tight box; "table" and "accent table" found nothing. Added to the side table phrasings; Muse confirmed it ("dark wood side table with metal legs"). The light rug under the TV stand is missed by both "rug" and "shag rug". Scored by hand, tv.jpg is 5 of 6 belongings on the schedule, no false lines.
 * Fixed-bin color histograms split the same couch under 7% dimming; replaced with chromaticity plus tolerant luminance.
 * Images sent through chat apps lose EXIF dates; use originals from the phone or Google Photos.
 
 ## Open items, in order
 
 0. Comparable finder (`pol/comps.py`, new): for each item, use Muse Spark with search grounding (docs: https://dev.meta.ai/docs/search-grounding) to find 3 to 5 current listings of like kind and quality, returned as structured JSON (source, url, title, price, retrieved date). Feed them to `ClaimantEntry.comparables`; `pol/pricing.py` does the math. Prompt must forbid inventing listings; drop any comp whose URL the response did not actually cite. Add `--price` to `build_schedule.py`. Log cost.
-1. Real test set: 40 to 60 original photos across Jason's homes; hand-label items for an honest found/missed/wrong-merge evaluation.
+1. Real test set: 40 to 60 original photos across Jason's homes (Jason gathering them, expected Oct 29), into `pol-photos`. Include the same furniture in more than one home, to test merging. Then `test_sam.py` on each, `build_schedule.py --describe`, `evaluate.py --init`, label, `evaluate.py`. About $0.08 per photo. Labels are prefilled from the pipeline, which can anchor the labeller: check misses against the photo itself, not the sheet.
 2. Walkthrough video: SAM 3.1 video tracking, plus Muse Voice Transcribe on narration to fill purchase details.
 3. UI: photo grid, item cards with proof crops side by side, inventory table with totals, CSV export.
 4. Demo video script and recording; README results section; submission text; X post.
