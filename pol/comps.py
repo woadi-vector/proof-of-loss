@@ -215,3 +215,91 @@ def parse_answer(text: str) -> tuple[str, list[Proposed]]:
         out.append(Proposed(str(x.get("source", "")).strip(), str(x.get("url", "")).strip(),
                             str(x.get("title", "")).strip(), price, str(x.get("currency", "")).strip()))
     return str(d.get("assumptions", "") or "").strip(), out
+
+
+# Google Shopping through SerpApi -------------------------------------------------
+
+SERPAPI_URL = "https://serpapi.com/search.json"
+
+
+def serpapi_key() -> str:
+    import os
+
+    from .providers import _env_file
+    return os.environ.get("SERPAPI_KEY") or _env_file().get("SERPAPI_KEY", "")
+
+
+def _shopping_currency(price_text: str, region: str) -> str:
+    """Currency as Google Shopping showed it. Only a Canadian search with a plain or
+    CA$ sign counts as CAD; anything else is left blank and pricing sets it aside."""
+    t = price_text.replace(" ", " ").strip()
+    if region.upper() == "CA" and (t.startswith("CA$") or t.startswith("C$") or t.startswith("$")):
+        return "CAD"
+    if region.upper() == "US" and t.startswith("$"):
+        return "USD"
+    return ""
+
+
+def find_shopping(line_id: str, item: str, get_json: Callable[[dict], dict], currency: str = "CAD",
+                  region: str = "CA", max_keep: int = 5, snapshot_dir: Path | None = None,
+                  today: date | None = None, search_note: str = "") -> FindResult:
+    """One Google Shopping search. Keeps new-condition results with a store and a
+    price, exactly as Google showed them; saves the whole raw answer with its SHA-256
+    as the backup. Used and resale listings are set aside."""
+    today = today or date.today()
+    params = {"engine": "google_shopping", "q": item, "gl": region.lower(), "hl": "en",
+              "google_domain": "google.ca" if region.upper() == "CA" else "google.com"}
+    data = get_json(params)
+    if data.get("error"):
+        raise RuntimeError(f"SerpApi: {data['error']}")
+    res = FindResult(line_id, item, [], [], search_note, [item])
+    raw = json.dumps(data, sort_keys=True).encode("utf-8")
+    sha = hashlib.sha256(raw).hexdigest()
+    if snapshot_dir is not None:
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        name = f"line{line_id}_shopping_{sha[:10]}.json"
+        (snapshot_dir / name).write_bytes(raw)
+        meta = data.get("search_metadata", {})
+        res.snapshots.append({"line": line_id, "file": name, "sha256": sha, "retrieved": today.isoformat(),
+                              "search_id": meta.get("id", ""),
+                              "google_url": meta.get("google_shopping_url", "")})
+    seen: set[str] = set()
+    for r in data.get("shopping_results", []) or []:
+        price = r.get("extracted_price")
+        url = r.get("link") or r.get("product_link") or ""
+        p = Proposed(str(r.get("source", "")).strip(), url, str(r.get("title", "")).strip(),
+                     float(price) if isinstance(price, (int, float)) else 0.0,
+                     _shopping_currency(str(r.get("price", "")), region))
+        if r.get("second_hand_condition"):
+            res.dropped.append(Dropped(p, f"used or resale ({r['second_hand_condition']})"))
+            continue
+        if not p.source or not p.url or p.price <= 0:
+            res.dropped.append(Dropped(p, "missing store, link or price"))
+            continue
+        key = (p.source.lower(), round(p.price, 2))
+        if key in seen:
+            res.dropped.append(Dropped(p, "same store and price listed twice"))
+            continue
+        if len(res.kept) >= max_keep:
+            res.dropped.append(Dropped(p, f"beyond the first {max_keep} results"))
+            continue
+        seen.add(key)
+        note = "price as shown on Google Shopping " + region.upper()
+        if search_note:
+            note += f"; {search_note}"
+        res.kept.append(Comparable(source=p.source, url=p.url, price=round(p.price, 2), title=p.title,
+                                   retrieved=today.isoformat(), currency=p.currency,
+                                   region=region.upper(), note=note))
+    return res
+
+
+def serpapi_get(api_key: str) -> Callable[[dict], dict]:
+    import requests
+
+    def get(params: dict) -> dict:
+        r = requests.get(SERPAPI_URL, params={**params, "api_key": api_key}, timeout=60)
+        try:
+            return r.json()
+        except ValueError:
+            return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+    return get
