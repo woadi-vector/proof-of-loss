@@ -44,8 +44,10 @@ def test_only_cited_pages_are_kept_and_unconfirmed_prices_are_marked(tmp_path):
     assert a.note == "" and a.retrieved == "2026-11-17" and a.region == "CA"
     assert b.note == "price not found on the page; check before use", "page says 6,350, listing said 6,200"
     reasons = sorted(d.reason for d in r.dropped)
-    assert reasons == ["missing store, link or price", "page was not among the search results; not cited",
+    assert reasons == ["missing store, link or price",
+                       "page not among the search results, and it could not be opened to check",
                        "same page listed twice"]
+    assert r.cited_pages == ["https://www.storea.ca/p/tote-123?utm=x", "https://storeb.ca/item/tote/"]
     assert len(r.snapshots) == 2 and all(len(s["sha256"]) == 64 for s in r.snapshots)
     assert (tmp_path / "pages" / r.snapshots[0]["file"]).exists()
     # The model never sets the number: pricing averages what was kept.
@@ -72,3 +74,18 @@ def test_norm_url_and_parse():
            '"title": "T", "price": "1,050.00", "currency": "cad"}]}\n```'
     assumptions, listings = parse_answer(text)
     assert assumptions == "none" and listings[0].price == 1050.0 and listings[0].currency == "cad"
+
+
+def test_uncited_page_is_kept_only_when_it_shows_the_price(tmp_path):
+    pages = {"https://shop.ca/a": Page("https://shop.ca/a", 200, "<b>$549.99</b>"),
+             "https://shop.ca/b": Page("https://shop.ca/b", 200, "<b>$499.99</b>"),
+             "https://shop.ca/c": Page("https://shop.ca/c", 404, "")}
+    ans = SearchAnswer("", [Proposed("Shop", "https://shop.ca/a", "V8", 549.99, "CAD"),
+                            Proposed("Shop", "https://shop.ca/b", "Ball", 599.99, "CAD"),
+                            Proposed("Shop", "https://shop.ca/c", "Gone", 300.0, "CAD")], [], [])
+    r = find_comps("31", "Dyson vacuum", FakeFinder(ans), Ledger(), fetch=pages.get, snapshot_dir=tmp_path)
+    assert [c.url for c in r.kept] == ["https://shop.ca/a"]
+    assert r.kept[0].note.startswith("price confirmed on the page")
+    assert sorted(d.reason for d in r.dropped) == [
+        "page not among the search results, and it could not be opened to check",
+        "page not among the search results, and the listed price is not on it"]

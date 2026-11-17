@@ -32,6 +32,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True, help="comps.csv to write or extend")
     ap.add_argument("--lines", dest="only", help="comma-separated line numbers (default: all)")
     ap.add_argument("--limit", type=int, help="stop after this many lines (for a first look)")
+    ap.add_argument("--redo", action="store_true", help="search the --lines again even if already done")
     ap.add_argument("--currency", default="CAD")
     ap.add_argument("--region", default="CA")
     a = ap.parse_args()
@@ -46,6 +47,15 @@ def main() -> None:
         if path.exists():
             done |= {json.loads(x)["line"] for x in path.read_text(encoding="utf-8").splitlines() if x.strip()}
     want = {x.strip() for x in a.only.split(",")} if a.only else None
+    if a.redo and want:
+        done -= want
+        if a.out.exists():  # drop the old listings for redone lines so they are not doubled
+            with open(a.out, newline="", encoding="utf-8") as f:
+                keep = [r for r in csv.DictReader(f) if r["line"] not in want]
+            with open(a.out, "w", newline="", encoding="utf-8") as f:
+                w0 = csv.DictWriter(f, fieldnames=COLS)
+                w0.writeheader()
+                w0.writerows({k: r.get(k, "") for k in COLS} for r in keep)
     todo = [il for il in claim.lines if (want is None or il.line.line_id in want) and il.line.line_id not in done]
     if a.limit:
         todo = todo[:a.limit]
@@ -63,7 +73,8 @@ def main() -> None:
             w.writeheader()
         for il in todo:
             ln = il.line
-            item = " ".join(x for x in (il.brand, il.model, ln.description) if x)
+            parts = [x for x in (il.brand, il.model) if x and x.lower() not in ln.description.lower()]
+            item = " ".join(parts + [ln.description])
             try:
                 r = find_comps(ln.line_id, item, provider, ledger, a.currency, a.region, snapshot_dir=snaps)
             except Exception as e:  # one bad line should not stop the run
@@ -77,12 +88,12 @@ def main() -> None:
             f.flush()
             searches += len(r.queries)
             log.write(json.dumps({"line": ln.line_id, "item": item, "assumptions": r.assumptions,
-                                  "queries": r.queries, "kept": len(r.kept),
+                                  "queries": r.queries, "cited_pages": r.cited_pages, "kept": len(r.kept),
                                   "dropped": [{"url": d.listing.url, "price": d.listing.price,
                                                "reason": d.reason} for d in r.dropped],
                                   "snapshots": r.snapshots}) + "\n")
             log.flush()
-            checked = sum(1 for c in r.kept if not c.note)
+            checked = sum(1 for c in r.kept if not c.note or c.note.startswith("price confirmed"))
             print(f"line {ln.line_id:>3} {item[:40]:<40} kept {len(r.kept)} "
                   f"(price confirmed on page: {checked}), dropped {len(r.dropped)}")
 
