@@ -33,6 +33,7 @@ def main() -> None:
     ap.add_argument("--lines", dest="only", help="comma-separated line numbers (default: all)")
     ap.add_argument("--limit", type=int, help="stop after this many lines (for a first look)")
     ap.add_argument("--redo", action="store_true", help="search the --lines again even if already done")
+    ap.add_argument("--dump", action="store_true", help="save the raw model answers to comps_raw/ for diagnosis")
     ap.add_argument("--currency", default="CAD")
     ap.add_argument("--region", default="CA")
     a = ap.parse_args()
@@ -64,6 +65,8 @@ def main() -> None:
         return
 
     provider, ledger = GoogleProvider(), Ledger()
+    if a.dump:
+        provider.dump_dir = a.out.parent / "comps_raw"
     snaps = a.out.parent / "comp_pages"
     new = not a.out.exists()
     searches = 0
