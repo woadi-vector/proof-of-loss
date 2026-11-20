@@ -58,6 +58,11 @@ dependencies {
     implementation(libs.firebase.ai.ondevice)
     // App Check debug provider for development; Play Integrity replaces it for release.
     implementation(libs.firebase.appcheck.debug)
+    // In-app camera: rear lens only; photos and walk video written by this app.
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.video)
+    implementation(libs.androidx.camera.view)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

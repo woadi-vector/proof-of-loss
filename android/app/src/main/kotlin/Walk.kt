@@ -33,6 +33,16 @@ data class Capture(
     val modelError: String? = null,
     val raw: String? = null, // the model's own words when nothing could be read from them
     val setAside: List<String> = emptyList(), // named by the model, but part of the building
+    val notProperty: List<String> = emptyList(), // people and animals: not contents
+)
+
+/** A walk video recorded in the app: hashed when recording stops, never modified. */
+data class VideoRecord(
+    val sha256: String,
+    val file: String,
+    val room: String, // the room selected when recording started; narration names the rest
+    val startedAt: String,
+    val durationMs: Long,
 )
 
 data class Walk(
@@ -41,6 +51,7 @@ data class Walk(
     val startedAt: String,
     val device: String,
     val captures: List<Capture>,
+    val videos: List<VideoRecord> = emptyList(),
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("format", "pol-walk-1")
@@ -62,12 +73,20 @@ data class Walk(
                     .put("model_error", c.modelError ?: JSONObject.NULL)
                     .put("raw", c.raw ?: JSONObject.NULL)
                     .put("set_aside_as_structure", JSONArray(c.setAside))
+                    .put("set_aside_not_property", JSONArray(c.notProperty))
                     .put("items", JSONArray().apply {
                         c.items.forEach {
                             put(JSONObject().put("name", it.name).put("brand_model", it.brandModel)
                                 .put("clear", it.clear))
                         }
                     }))
+            }
+        })
+        .put("videos", JSONArray().apply {
+            videos.forEach { v ->
+                put(JSONObject().put("file", v.file).put("sha256", v.sha256).put("room", v.room)
+                    .put("started_at", v.startedAt).put("duration_ms", v.durationMs)
+                    .put("provenance", "captured_in_app"))
             }
         })
 
@@ -92,10 +111,17 @@ data class Walk(
                     modelError = p.optStringOrNull("model_error"),
                     raw = p.optStringOrNull("raw"),
                     setAside = p.optJSONArray("set_aside_as_structure")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+                    notProperty = p.optJSONArray("set_aside_not_property")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                 )
             }
+            val vids = o.optJSONArray("videos") ?: JSONArray()
+            val videos = (0 until vids.length()).map { i ->
+                val v = vids.getJSONObject(i)
+                VideoRecord(v.getString("sha256"), v.getString("file"), v.optString("room"),
+                    v.optString("started_at"), v.optLong("duration_ms"))
+            }
             return Walk(o.getString("walk_id"), o.optString("label"), o.optString("started_at"),
-                o.optString("device"), caps)
+                o.optString("device"), caps, videos)
         }
 
         private fun JSONObject.optStringOrNull(k: String): String? =
@@ -129,6 +155,18 @@ class WalkStore(root: File) {
     }
 
     fun newPhotoFile(): File = File(dir, "pending_${System.currentTimeMillis()}.jpg")
+
+    fun newVideoFile(): File = File(dir, "pending_${System.currentTimeMillis()}.mp4")
+
+    fun video(v: VideoRecord): File = File(dir, v.file)
+
+    /** Hash a finished walk video, then name it by its hash. */
+    fun acceptVideo(pending: File): Pair<String, File> {
+        val sha = sha256(pending)
+        val dest = File(dir, "$sha.mp4")
+        if (dest.exists()) pending.delete() else pending.renameTo(dest)
+        return sha to dest
+    }
 
     fun photo(c: Capture): File = File(dir, c.file)
 
@@ -210,3 +248,12 @@ private fun isStructurePart(name: String): Boolean {
     val last = n.substringAfterLast(' ')
     return last in setOf("wall", "door", "doors", "window", "windows", "floor", "ceiling", "vent", "outlet", "baseboard", "trim")
 }
+
+private val NOT_PROPERTY = setOf(
+    "dog", "dogs", "puppy", "cat", "cats", "kitten", "pet", "pets", "person", "people", "man", "woman",
+    "child", "children", "kid", "baby", "bird", "fish", "hamster", "rabbit",
+)
+
+/** People and animals are not contents. Set aside and shown, like building parts. */
+fun isNotProperty(name: String): Boolean =
+    name.lowercase().replace(Regex("[^a-z ]"), " ").trim().split(Regex("\\s+")).lastOrNull() in NOT_PROPERTY

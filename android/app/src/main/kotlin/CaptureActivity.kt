@@ -118,7 +118,6 @@ fun WalkScreen(store: WalkStore) {
     var mode by rememberSaveable { mutableStateOf(Mode.PREFER_ON_DEVICE) }
     val spotter = remember(mode) { Spotter(mode) }
     var room by rememberSaveable { mutableStateOf(walk.captures.firstOrNull()?.room?.takeIf { it != "Unnamed room" } ?: "") }
-    var pendingPath by rememberSaveable { mutableStateOf<String?>(null) }
     var modelStatus by remember { mutableStateOf("Checking for Gemini Nano on this phone") }
     var canDownload by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf(setOf<String>()) }
@@ -140,9 +139,11 @@ fun WalkScreen(store: WalkStore) {
                 val bmp: Bitmap = withContext(Dispatchers.IO) { loadScaled(store.photo(c), 1024) }
                     ?: throw IllegalStateException("could not read the photo")
                 val r = spotter.spot(bmp)
-                val (structure, contents) = r.items.partition { isStructure(it.name) }
+                val (notProp, rest) = r.items.partition { isNotProperty(it.name) }
+                val (structure, contents) = rest.partition { isStructure(it.name) }
                 replace(sha) { it.copy(items = contents, source = r.source, modelMs = r.ms, modelError = null,
-                    raw = if (r.items.isEmpty()) r.raw else null, setAside = structure.map { s -> s.name }) }
+                    raw = if (r.items.isEmpty()) r.raw else null, setAside = structure.map { s -> s.name },
+                    notProperty = notProp.map { s -> s.name }) }
             } catch (e: Exception) {
                 replace(sha) { it.copy(modelError = e.message ?: e.javaClass.simpleName) }
             } finally {
@@ -165,15 +166,10 @@ fun WalkScreen(store: WalkStore) {
         if (s == OnDeviceModelStatus.AVAILABLE) spotter.warmUp()
     }
 
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val path = pendingPath
-        pendingPath = null
-        if (path == null) return@rememberLauncherForActivityResult
-        val pending = File(path)
-        if (!ok || !pending.exists() || pending.length() == 0L) {
-            pending.delete()
-            return@rememberLauncherForActivityResult
-        }
+    var cameraOpen by rememberSaveable { mutableStateOf(false) }
+
+    fun acceptPhoto(pending: File) {
+        if (!pending.exists() || pending.length() == 0L) { pending.delete(); return }
         scope.launch {
             // Hash first, before anything else reads or touches the file.
             val (sha, file) = withContext(Dispatchers.IO) { store.accept(pending) }
@@ -188,11 +184,26 @@ fun WalkScreen(store: WalkStore) {
         }
     }
 
-    fun takePhoto() {
-        val f = store.newPhotoFile()
-        pendingPath = f.absolutePath
-        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
-        camera.launch(uri)
+    fun acceptVideo(pending: File, startedAt: String, durationMs: Long) {
+        if (!pending.exists() || pending.length() == 0L) { pending.delete(); return }
+        scope.launch {
+            val (sha, file) = withContext(Dispatchers.IO) { store.acceptVideo(pending) }
+            if (walk.videos.none { it.sha256 == sha }) {
+                update(walk.copy(videos = listOf(VideoRecord(sha, file.name, room.trim(), startedAt, durationMs)) + walk.videos))
+            }
+        }
+    }
+
+    if (cameraOpen) {
+        CameraScreen(
+            room = room,
+            newPhotoFile = { store.newPhotoFile() },
+            newVideoFile = { store.newVideoFile() },
+            onPhoto = { acceptPhoto(it) },
+            onVideo = { f, startedAt, ms -> acceptVideo(f, startedAt, ms) },
+            onClose = { cameraOpen = false },
+        )
+        return
     }
 
     fun share() {
@@ -200,6 +211,7 @@ fun WalkScreen(store: WalkStore) {
         val uris = ArrayList<Uri>()
         uris += FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", store.recordFile())
         walk.captures.forEach { uris += FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", store.photo(it)) }
+        walk.videos.forEach { uris += FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", store.video(it)) }
         val send = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
             type = "*/*"
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
@@ -258,10 +270,24 @@ fun WalkScreen(store: WalkStore) {
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { takePhoto() }, enabled = room.isNotBlank(), modifier = Modifier.weight(1f)) {
-                        Text(if (room.isBlank()) "Choose a room first" else "Take photo")
+                    Button(onClick = { cameraOpen = true }, enabled = room.isNotBlank(), modifier = Modifier.weight(1f)) {
+                        Text(if (room.isBlank()) "Choose a room first" else "Open camera")
                     }
-                    OutlinedButton(onClick = { share() }, enabled = walk.captures.isNotEmpty()) { Text("Share walk") }
+                    OutlinedButton(onClick = { share() }, enabled = walk.captures.isNotEmpty() || walk.videos.isNotEmpty()) { Text("Share walk") }
+                }
+            }
+            items(walk.videos, key = { it.sha256 }) { v ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Walk video · ${v.room}", fontWeight = FontWeight.SemiBold)
+                        Text("Captured in app · ${v.startedAt.take(16).replace('T', ' ')} UTC · " +
+                            "${v.durationMs / 60000}:${"%02d".format((v.durationMs / 1000) % 60)}",
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("SHA-256 ${v.sha256.take(16)}…", fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Kept unchanged for review. Frames come from it in the next step.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
             items(walk.captures, key = { it.sha256 }) { c ->
@@ -333,6 +359,10 @@ fun CaptureCard(c: Capture, file: File, busy: Boolean, onRetry: () -> Unit) {
                             color = if (it2.clear) MaterialTheme.colorScheme.onSurface else WARN,
                         )
                     }
+                }
+                if (c.notProperty.isNotEmpty()) {
+                    Text("Set aside, not property: ${c.notProperty.joinToString(", ")}",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (c.setAside.isNotEmpty()) {
                     Text("Set aside as part of the building: ${c.setAside.joinToString(", ")}",
