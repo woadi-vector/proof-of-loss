@@ -137,7 +137,8 @@ fun WalkScreen(store: WalkStore) {
                 val bmp: Bitmap = withContext(Dispatchers.IO) { loadScaled(store.photo(c), 1024) }
                     ?: throw IllegalStateException("could not read the photo")
                 val r = spotter.spot(bmp)
-                replace(sha) { it.copy(items = r.items, source = r.source, modelMs = r.ms, modelError = null) }
+                replace(sha) { it.copy(items = r.items, source = r.source, modelMs = r.ms, modelError = null,
+                    raw = if (r.items.isEmpty()) r.raw else null) }
             } catch (e: Exception) {
                 replace(sha) { it.copy(modelError = e.message ?: e.javaClass.simpleName) }
             } finally {
@@ -318,8 +319,12 @@ fun CaptureCard(c: Capture, file: File, busy: Boolean, onRetry: () -> Unit) {
                         Text("Not read yet: ${c.modelError}", color = WARN, style = MaterialTheme.typography.bodySmall)
                         TextButton(onClick = onRetry) { Text("Look again") }
                     }
-                    c.items.isEmpty() && c.source != null ->
+                    c.items.isEmpty() && c.source != null -> {
                         Text("No household items named.", style = MaterialTheme.typography.bodySmall)
+                        if (!c.raw.isNullOrBlank()) Text("Model said: ${c.raw}", fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick = onRetry) { Text("Look again") }
+                    }
                     else -> c.items.forEach { it2 ->
                         Text(
                             buildString {

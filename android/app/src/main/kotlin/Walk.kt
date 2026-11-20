@@ -31,6 +31,7 @@ data class Capture(
     val source: String? = null, // "on_device" or "in_cloud": where the model actually ran
     val modelMs: Long? = null,
     val modelError: String? = null,
+    val raw: String? = null, // the model's own words when nothing could be read from them
 )
 
 data class Walk(
@@ -58,6 +59,7 @@ data class Walk(
                     .put("source", c.source ?: JSONObject.NULL)
                     .put("model_ms", c.modelMs ?: JSONObject.NULL)
                     .put("model_error", c.modelError ?: JSONObject.NULL)
+                    .put("raw", c.raw ?: JSONObject.NULL)
                     .put("items", JSONArray().apply {
                         c.items.forEach {
                             put(JSONObject().put("name", it.name).put("brand_model", it.brandModel)
@@ -86,6 +88,7 @@ data class Walk(
                     source = p.optStringOrNull("source"),
                     modelMs = if (p.isNull("model_ms")) null else p.optLong("model_ms"),
                     modelError = p.optStringOrNull("model_error"),
+                    raw = p.optStringOrNull("raw"),
                 )
             }
             return Walk(o.getString("walk_id"), o.optString("label"), o.optString("started_at"),

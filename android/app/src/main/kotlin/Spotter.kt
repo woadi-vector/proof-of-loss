@@ -15,6 +15,7 @@ import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 import kotlinx.coroutines.flow.Flow
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Cloud model used when Gemini Nano is not available on the phone. */
@@ -26,7 +27,7 @@ enum class Mode(val label: String, val inference: InferenceMode) {
     ONLY_IN_CLOUD("Cloud only", InferenceMode.ONLY_IN_CLOUD),
 }
 
-data class SpotResult(val items: List<Spotted>, val source: String, val ms: Long)
+data class SpotResult(val items: List<Spotted>, val source: String, val ms: Long, val raw: String)
 
 private const val SPOT_PROMPT = """You are helping a field insurance adjuster record what is in a room.
 List up to 8 household items (furniture, electronics, appliances, clothing, decor, tools) you can see in this photo.
@@ -85,22 +86,35 @@ class Spotter(val mode: Mode) {
         val ms = System.currentTimeMillis() - t0
         val source = if (response.inferenceSource.toString().contains("DEVICE", ignoreCase = true))
             "on_device" else "in_cloud"
-        return SpotResult(parseItems(response.text ?: ""), source, ms)
+        val text = response.text ?: ""
+        return SpotResult(parseItems(text), source, ms, text.take(400))
     }
 }
 
 /** Lenient reading of the model's JSON. Anything malformed is dropped, never invented. */
 fun parseItems(text: String): List<Spotted> {
     val t = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-    val start = t.indexOf('{')
-    val end = t.lastIndexOf('}')
-    if (start < 0 || end <= start) return emptyList()
-    val arr = runCatching { JSONObject(t.substring(start, end + 1)).optJSONArray("items") }.getOrNull()
-        ?: return emptyList()
+    val arr: JSONArray = runCatching {
+        val a = t.indexOf('[')
+        val o = t.indexOf('{')
+        if (a >= 0 && (o < 0 || a < o)) JSONArray(t.substring(a, t.lastIndexOf(']') + 1))
+        else {
+            val obj = JSONObject(t.substring(o, t.lastIndexOf('}') + 1))
+            obj.optJSONArray("items") ?: obj.optJSONArray("objects")
+                ?: obj.keys().asSequence().mapNotNull { obj.optJSONArray(it) }.firstOrNull()
+                ?: JSONArray().put(obj)
+        }
+    }.getOrNull() ?: return emptyList()
     return (0 until arr.length()).mapNotNull { i ->
-        val o = arr.optJSONObject(i) ?: return@mapNotNull null
-        val name = o.optString("name").trim()
-        if (name.isEmpty()) null
-        else Spotted(name, o.optString("brand_model").trim(), o.optBoolean("clear", false))
+        val v = arr.opt(i)
+        when (v) {
+            is String -> v.trim().takeIf { it.isNotEmpty() }?.let { Spotted(it, "", true) }
+            is JSONObject -> {
+                val name = (v.optString("name").ifBlank { v.optString("item") }).trim()
+                if (name.isEmpty()) null
+                else Spotted(name, v.optString("brand_model").trim(), v.optBoolean("clear", true))
+            }
+            else -> null
+        }
     }
 }
