@@ -31,6 +31,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -114,7 +117,7 @@ fun WalkScreen(store: WalkStore) {
     }
     var mode by rememberSaveable { mutableStateOf(Mode.PREFER_ON_DEVICE) }
     val spotter = remember(mode) { Spotter(mode) }
-    var room by rememberSaveable { mutableStateOf(walk.captures.lastOrNull()?.room ?: "") }
+    var room by rememberSaveable { mutableStateOf(walk.captures.firstOrNull()?.room?.takeIf { it != "Unnamed room" } ?: "") }
     var pendingPath by rememberSaveable { mutableStateOf<String?>(null) }
     var modelStatus by remember { mutableStateOf("Checking for Gemini Nano on this phone") }
     var canDownload by remember { mutableStateOf(false) }
@@ -176,7 +179,7 @@ fun WalkScreen(store: WalkStore) {
             val (sha, file) = withContext(Dispatchers.IO) { store.accept(pending) }
             if (walk.captures.none { it.sha256 == sha }) {
                 val c = Capture(
-                    sha256 = sha, file = file.name, room = room.trim().ifEmpty { "Unnamed room" },
+                    sha256 = sha, file = file.name, room = room.trim(),
                     capturedAt = Instant.now().toString(), recordedAt = exifDate(file),
                 )
                 update(walk.copy(captures = listOf(c) + walk.captures))
@@ -205,7 +208,6 @@ fun WalkScreen(store: WalkStore) {
         ctx.startActivity(Intent.createChooser(send, "Share walk"))
     }
 
-    val rooms = walk.captures.map { it.room }.distinct()
     val onDevice = walk.captures.count { it.source == "on_device" }
     val inCloud = walk.captures.count { it.source == "in_cloud" }
 
@@ -252,19 +254,13 @@ fun WalkScreen(store: WalkStore) {
                 }
             }
             item {
-                OutlinedTextField(
-                    value = room, onValueChange = { room = it }, label = { Text("Room") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth(),
-                )
-                if (rooms.isNotEmpty()) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-                        items(rooms) { r -> TextButton(onClick = { room = r }) { Text(r) } }
-                    }
-                }
+                RoomPicker(room, walk.captures.map { it.room }) { room = it }
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { takePhoto() }, modifier = Modifier.weight(1f)) { Text("Take photo") }
+                    Button(onClick = { takePhoto() }, enabled = room.isNotBlank(), modifier = Modifier.weight(1f)) {
+                        Text(if (room.isBlank()) "Choose a room first" else "Take photo")
+                    }
                     OutlinedButton(onClick = { share() }, enabled = walk.captures.isNotEmpty()) { Text("Share walk") }
                 }
             }
@@ -346,6 +342,61 @@ fun CaptureCard(c: Capture, file: File, busy: Boolean, onRetry: () -> Unit) {
                     Text("${"%.1f".format(c.modelMs / 1000.0)} s", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+        }
+    }
+}
+
+/** Standard room names, so one room never appears under two spellings in a walk. */
+val STANDARD_ROOMS = listOf(
+    "Living room", "Family room", "Kitchen", "Dining room", "Primary bedroom", "Bedroom 2",
+    "Bedroom 3", "Bedroom 4", "Primary bathroom", "Bathroom 2", "Half bath", "Office", "Laundry room",
+    "Garage", "Basement", "Attic", "Hallway", "Closet", "Mudroom", "Patio or porch", "Shed",
+)
+
+@Composable
+fun RoomPicker(selected: String, used: List<String>, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    var typing by rememberSaveable { mutableStateOf(false) }
+    var custom by rememberSaveable { mutableStateOf("") }
+    // Rooms already used on this walk come first; matching ignores letter case.
+    val extra = used.filter { u -> u.isNotBlank() && u != "Unnamed room" &&
+        STANDARD_ROOMS.none { it.equals(u, ignoreCase = true) } }.distinctBy { it.lowercase() }
+    Column {
+        Text("Room", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Box {
+            OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(selected.ifBlank { "Choose a room" }, modifier = Modifier.weight(1f))
+                Text("▾")
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                extra.forEach { r ->
+                    DropdownMenuItem(text = { Text(r) }, onClick = { onPick(r); typing = false; open = false })
+                }
+                if (extra.isNotEmpty()) HorizontalDivider()
+                STANDARD_ROOMS.forEach { r ->
+                    DropdownMenuItem(text = { Text(r) }, onClick = { onPick(r); typing = false; open = false })
+                }
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("Other…") }, onClick = { typing = true; open = false })
+            }
+        }
+        if (typing) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                OutlinedTextField(
+                    value = custom, onValueChange = { custom = it }, label = { Text("Other room") },
+                    singleLine = true, modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = {
+                    val name = custom.trim()
+                    if (name.isNotEmpty()) {
+                        // Reuse an existing spelling instead of making a second room.
+                        val match = (STANDARD_ROOMS + used).firstOrNull { it.equals(name, ignoreCase = true) }
+                        onPick(match ?: name.replaceFirstChar { it.uppercase() })
+                        typing = false
+                        custom = ""
+                    }
+                }) { Text("Use") }
             }
         }
     }

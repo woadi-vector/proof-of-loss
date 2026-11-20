@@ -198,7 +198,13 @@ private val STRUCTURE = setOf(
     "ceiling fan", "smoke detector", "thermostat",
 )
 
-fun isStructure(name: String): Boolean {
+fun isStructure(name: String): Boolean =
+    // "storage cabinet/closet doors": set aside only if every part is a building part.
+    name.split('/', ',', '&').map { it.trim() }.filter { it.isNotEmpty() }.let { parts ->
+        parts.isNotEmpty() && parts.all { isStructurePart(it) }
+    }
+
+private fun isStructurePart(name: String): Boolean {
     val n = name.lowercase().replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ").trim()
     if (n in STRUCTURE) return true
     val last = n.substringAfterLast(' ')
