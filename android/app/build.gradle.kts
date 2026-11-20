@@ -37,6 +37,13 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        // Firebase AI Logic's hybrid (on-device) API is a public preview.
+        optIn.add("com.google.firebase.ai.type.PublicPreviewAPI")
+    }
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

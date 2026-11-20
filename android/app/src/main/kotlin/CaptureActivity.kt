@@ -1,3 +1,5 @@
+@file:OptIn(com.google.firebase.ai.type.PublicPreviewAPI::class)
+
 package com.woadivector.proofofloss
 
 import android.content.Intent
