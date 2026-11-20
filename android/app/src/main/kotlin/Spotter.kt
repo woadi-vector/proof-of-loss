@@ -30,7 +30,7 @@ enum class Mode(val label: String, val inference: InferenceMode) {
 data class SpotResult(val items: List<Spotted>, val source: String, val ms: Long, val raw: String)
 
 private const val SPOT_PROMPT = """You are helping a field insurance adjuster record what is in a room.
-List up to 8 household items (furniture, electronics, appliances, clothing, decor, tools) you can see in this photo.
+List up to 6 household items, the most valuable first, (furniture, electronics, appliances, clothing, decor, tools) you can see in this photo.
 For each item give:
 - name: a short plain name, like "65 inch television" or "leather recliner"
 - brand_model: the brand and model only if you can read them on the item; otherwise ""
@@ -91,8 +91,21 @@ class Spotter(val mode: Mode) {
     }
 }
 
-/** Lenient reading of the model's JSON. Anything malformed is dropped, never invented. */
+/**
+ * Lenient reading of the model's JSON. Anything malformed is dropped, never invented. When the
+ * answer was cut off at the output limit, every item that was written out in full is kept.
+ */
 fun parseItems(text: String): List<Spotted> {
+    val whole = parseWhole(text)
+    if (whole.isNotEmpty()) return whole
+    return Regex("""\{[^{}]*\}""").findAll(text).mapNotNull { m ->
+        val o = runCatching { JSONObject(m.value) }.getOrNull() ?: return@mapNotNull null
+        val name = (o.optString("name").ifBlank { o.optString("item") }).trim()
+        if (name.isEmpty()) null else Spotted(name, o.optString("brand_model").trim(), o.optBoolean("clear", true))
+    }.toList()
+}
+
+private fun parseWhole(text: String): List<Spotted> {
     val t = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
     val arr: JSONArray = runCatching {
         val a = t.indexOf('[')

@@ -338,7 +338,40 @@ fun WalkScreen(store: WalkStore) {
                     }
                 }
             }
-            items(walk.captures, key = { it.sha256 }) { c ->
+            val inventory = buildInventory(walk.captures)
+            if (inventory.isNotEmpty()) item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Room inventory", fontWeight = FontWeight.SemiBold)
+                        Text("${inventory.size} belongings from ${walk.captures.count { it.source != null }} photos and frames. " +
+                            "Repeats are rolled up, never dropped; each line keeps every sighting.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        inventory.groupBy { it.room }.forEach { (r, lines) ->
+                            Text(r, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                            lines.forEach { ln ->
+                                val times = ln.sightings.mapNotNull { it.atMs }.sorted()
+                                val span = if (times.isNotEmpty()) ", ${fmt(times.first())} to ${fmt(times.last())}" else ""
+                                Text(buildString {
+                                    append("• ").append(ln.name)
+                                    append("  (seen ${ln.sightings.size}×$span")
+                                    if (ln.clearCount < ln.sightings.size) append("; ${ln.clearCount} clear")
+                                    append(")")
+                                }, style = MaterialTheme.typography.bodySmall)
+                                if (ln.brandReadings.isNotEmpty()) {
+                                    // A brand read only once is never treated as the brand: small text blurs in video.
+                                    val agreed = ln.brandReadings.entries.size == 1 && ln.brandReadings.values.first() >= 2
+                                    Text("   brand read as " + ln.brandReadings.entries.joinToString(", ") {
+                                        "${it.key} ×${it.value}" + if (it.value == 1) " (unconfirmed)" else "" } +
+                                        if (agreed) "" else "; adjuster to confirm",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (agreed) MaterialTheme.colorScheme.onSurfaceVariant else WARN)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            items(walk.captures.sortedWith(compareBy({ it.fromVideo != null }, { it.atMs ?: 0L })), key = { it.sha256 }) { c ->
                 CaptureCard(c, store.photo(c), c.sha256 in working) { look(c.sha256) }
             }
             item {
@@ -480,3 +513,5 @@ fun RoomPicker(selected: String, used: List<String>, onPick: (String) -> Unit) {
         }
     }
 }
+
+private fun fmt(ms: Long) = "${ms / 60000}:${"%02d".format((ms / 1000) % 60)}"

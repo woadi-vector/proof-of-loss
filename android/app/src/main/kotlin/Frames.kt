@@ -17,13 +17,13 @@ import kotlin.math.abs
 data class PulledFrame(val ms: Long, val file: File, val sharpness: Double)
 
 private const val SAMPLE_MS = 500L
-private const val MIN_GAP_MS = 1500L
-private const val CHANGE_THRESHOLD = 18.0 // mean gray difference (0..255) on a 32x18 thumbnail
+private const val MIN_GAP_MS = 2500L
+private const val CHANGE_THRESHOLD = 32.0 // mean gray difference (0..255) on a 32x18 thumbnail
 
 fun pullFrames(
     video: File,
     outDir: File,
-    maxFrames: Int = 24,
+    maxFrames: Int = 12,
     progress: (String) -> Unit = {},
 ): List<PulledFrame> {
     val r = MediaMetadataRetriever()
