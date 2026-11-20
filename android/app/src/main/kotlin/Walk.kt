@@ -32,6 +32,7 @@ data class Capture(
     val modelMs: Long? = null,
     val modelError: String? = null,
     val raw: String? = null, // the model's own words when nothing could be read from them
+    val setAside: List<String> = emptyList(), // named by the model, but part of the building
 )
 
 data class Walk(
@@ -60,6 +61,7 @@ data class Walk(
                     .put("model_ms", c.modelMs ?: JSONObject.NULL)
                     .put("model_error", c.modelError ?: JSONObject.NULL)
                     .put("raw", c.raw ?: JSONObject.NULL)
+                    .put("set_aside_as_structure", JSONArray(c.setAside))
                     .put("items", JSONArray().apply {
                         c.items.forEach {
                             put(JSONObject().put("name", it.name).put("brand_model", it.brandModel)
@@ -89,6 +91,7 @@ data class Walk(
                     modelMs = if (p.isNull("model_ms")) null else p.optLong("model_ms"),
                     modelError = p.optStringOrNull("model_error"),
                     raw = p.optStringOrNull("raw"),
+                    setAside = p.optJSONArray("set_aside_as_structure")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                 )
             }
             return Walk(o.getString("walk_id"), o.optString("label"), o.optString("started_at"),
@@ -181,4 +184,23 @@ fun loadScaled(f: File, maxSide: Int): Bitmap? {
     if (rotation == 0f && scale >= 1f) return bmp
     val m = Matrix().apply { postScale(scale, scale); postRotate(rotation) }
     return Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+}
+
+/**
+ * Parts of the building are the structure claim, not contents. The model is told not to list
+ * them, but code makes the call: anything whose name is a building part is set aside and shown
+ * as set aside, never silently dropped.
+ */
+private val STRUCTURE = setOf(
+    "wall", "walls", "door", "doors", "doorway", "window", "windows", "floor", "flooring", "ceiling",
+    "vent", "air vent", "register", "outlet", "light switch", "switch", "baseboard", "trim", "molding",
+    "closet door", "closet doors", "carpet", "hardwood floor", "tile", "drywall", "stairs", "railing",
+    "ceiling fan", "smoke detector", "thermostat",
+)
+
+fun isStructure(name: String): Boolean {
+    val n = name.lowercase().replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ").trim()
+    if (n in STRUCTURE) return true
+    val last = n.substringAfterLast(' ')
+    return last in setOf("wall", "door", "doors", "window", "windows", "floor", "ceiling", "vent", "outlet", "baseboard", "trim")
 }

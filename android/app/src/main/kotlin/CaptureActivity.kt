@@ -137,8 +137,9 @@ fun WalkScreen(store: WalkStore) {
                 val bmp: Bitmap = withContext(Dispatchers.IO) { loadScaled(store.photo(c), 1024) }
                     ?: throw IllegalStateException("could not read the photo")
                 val r = spotter.spot(bmp)
-                replace(sha) { it.copy(items = r.items, source = r.source, modelMs = r.ms, modelError = null,
-                    raw = if (r.items.isEmpty()) r.raw else null) }
+                val (structure, contents) = r.items.partition { isStructure(it.name) }
+                replace(sha) { it.copy(items = contents, source = r.source, modelMs = r.ms, modelError = null,
+                    raw = if (r.items.isEmpty()) r.raw else null, setAside = structure.map { s -> s.name }) }
             } catch (e: Exception) {
                 replace(sha) { it.copy(modelError = e.message ?: e.javaClass.simpleName) }
             } finally {
@@ -336,6 +337,10 @@ fun CaptureCard(c: Capture, file: File, busy: Boolean, onRetry: () -> Unit) {
                             color = if (it2.clear) MaterialTheme.colorScheme.onSurface else WARN,
                         )
                     }
+                }
+                if (c.setAside.isNotEmpty()) {
+                    Text("Set aside as part of the building: ${c.setAside.joinToString(", ")}",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (c.modelMs != null) {
                     Text("${"%.1f".format(c.modelMs / 1000.0)} s", style = MaterialTheme.typography.labelSmall,
