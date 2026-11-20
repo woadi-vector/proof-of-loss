@@ -131,23 +131,63 @@ fun WalkScreen(store: WalkStore) {
         update(walk.copy(captures = walk.captures.map { if (it.sha256 == sha) f(it) else it }))
     }
 
-    fun look(sha: String) {
+    suspend fun spotOne(sha: String) {
         val c = walk.captures.firstOrNull { it.sha256 == sha } ?: return
         working = working + sha
+        try {
+            val bmp: Bitmap = withContext(Dispatchers.IO) { loadScaled(store.photo(c), 1024) }
+                ?: throw IllegalStateException("could not read the photo")
+            val r = spotter.spot(bmp)
+            val (notProp, rest) = r.items.partition { isNotProperty(it.name) }
+            val (structure, contents) = rest.partition { isStructure(it.name) }
+            replace(sha) { it.copy(items = contents, source = r.source, modelMs = r.ms, modelError = null,
+                raw = if (r.items.isEmpty()) r.raw else null, setAside = structure.map { s -> s.name },
+                notProperty = notProp.map { s -> s.name }) }
+        } catch (e: Exception) {
+            replace(sha) { it.copy(modelError = e.message ?: e.javaClass.simpleName) }
+        } finally {
+            working = working - sha
+        }
+    }
+
+    fun look(sha: String) {
+        scope.launch { spotOne(sha) }
+    }
+
+    var pulling by remember { mutableStateOf<String?>(null) } // video sha being processed
+    var pullNote by remember { mutableStateOf("") }
+
+    fun pull(v: VideoRecord) {
+        pulling = v.sha256
         scope.launch {
             try {
-                val bmp: Bitmap = withContext(Dispatchers.IO) { loadScaled(store.photo(c), 1024) }
-                    ?: throw IllegalStateException("could not read the photo")
-                val r = spotter.spot(bmp)
-                val (notProp, rest) = r.items.partition { isNotProperty(it.name) }
-                val (structure, contents) = rest.partition { isStructure(it.name) }
-                replace(sha) { it.copy(items = contents, source = r.source, modelMs = r.ms, modelError = null,
-                    raw = if (r.items.isEmpty()) r.raw else null, setAside = structure.map { s -> s.name },
-                    notProperty = notProp.map { s -> s.name }) }
+                val frames = withContext(Dispatchers.IO) {
+                    pullFrames(store.video(v), store.dir) { msg -> pullNote = msg }
+                }
+                val start = runCatching { Instant.parse(v.startedAt) }.getOrNull()
+                val added = mutableListOf<String>()
+                for (fr in frames) {
+                    val (sha, file) = withContext(Dispatchers.IO) { store.accept(fr.file) }
+                    if (walk.captures.none { it.sha256 == sha }) {
+                        val c = Capture(
+                            sha256 = sha, file = file.name, room = v.room,
+                            capturedAt = (start?.plusMillis(fr.ms) ?: Instant.now()).toString(),
+                            recordedAt = null, fromVideo = v.sha256, atMs = fr.ms,
+                        )
+                        update(walk.copy(captures = walk.captures + c))
+                        added += sha
+                    }
+                }
+                // Gemini Nano reads one frame at a time: the on-device model takes one image per request.
+                added.forEachIndexed { i, sha ->
+                    pullNote = "Reading frame ${i + 1} of ${added.size}"
+                    spotOne(sha)
+                }
+                pullNote = "${added.size} frames pulled and read"
             } catch (e: Exception) {
-                replace(sha) { it.copy(modelError = e.message ?: e.javaClass.simpleName) }
+                pullNote = "Could not pull frames: ${e.message}"
             } finally {
-                working = working - sha
+                pulling = null
             }
         }
     }
@@ -285,8 +325,16 @@ fun WalkScreen(store: WalkStore) {
                             style = MaterialTheme.typography.bodySmall)
                         Text("SHA-256 ${v.sha256.take(16)}…", fontFamily = FontFamily.Monospace, fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Kept unchanged for review. Frames come from it in the next step.",
+                        Text("Kept unchanged for review. Frames are copies; the video is never edited.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val frameCount = walk.captures.count { it.fromVideo == v.sha256 }
+                        if (pulling == v.sha256) Text(pullNote, style = MaterialTheme.typography.bodySmall)
+                        else {
+                            if (frameCount > 0) Text("$frameCount frames from this video", style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(onClick = { pull(v) }, enabled = pulling == null) {
+                                Text(if (frameCount == 0) "Pull frames" else "Pull frames again")
+                            }
+                        }
                     }
                 }
             }
@@ -332,7 +380,8 @@ fun CaptureCard(c: Capture, file: File, busy: Boolean, onRetry: () -> Unit) {
                     Spacer(Modifier.width(6.dp))
                     SourceTag(c.source)
                 }
-                Text("Captured in app · ${c.capturedAt.take(16).replace('T', ' ')} UTC",
+                Text(if (c.atMs != null) "Frame at ${c.atMs / 60000}:${"%02d".format((c.atMs / 1000) % 60)} of walk video"
+                    else "Captured in app · ${c.capturedAt.take(16).replace('T', ' ')} UTC",
                     style = MaterialTheme.typography.bodySmall)
                 Text("SHA-256 ${c.sha256.take(16)}…", fontFamily = FontFamily.Monospace, fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)

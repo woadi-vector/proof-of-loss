@@ -34,6 +34,8 @@ data class Capture(
     val raw: String? = null, // the model's own words when nothing could be read from them
     val setAside: List<String> = emptyList(), // named by the model, but part of the building
     val notProperty: List<String> = emptyList(), // people and animals: not contents
+    val fromVideo: String? = null, // SHA-256 of the walk video this frame was pulled from
+    val atMs: Long? = null, // where in that video
 )
 
 /** A walk video recorded in the app: hashed when recording stops, never modified. */
@@ -67,7 +69,9 @@ data class Walk(
                     .put("room", c.room)
                     .put("captured_at", c.capturedAt)
                     .put("recorded_at", c.recordedAt ?: JSONObject.NULL)
-                    .put("provenance", "captured_in_app")
+                    .put("provenance", if (c.fromVideo != null) "frame_from_video" else "captured_in_app")
+                    .put("from_video", c.fromVideo ?: JSONObject.NULL)
+                    .put("at_ms", c.atMs ?: JSONObject.NULL)
                     .put("source", c.source ?: JSONObject.NULL)
                     .put("model_ms", c.modelMs ?: JSONObject.NULL)
                     .put("model_error", c.modelError ?: JSONObject.NULL)
@@ -111,6 +115,8 @@ data class Walk(
                     modelError = p.optStringOrNull("model_error"),
                     raw = p.optStringOrNull("raw"),
                     setAside = p.optJSONArray("set_aside_as_structure")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+                    fromVideo = p.optStringOrNull("from_video"),
+                    atMs = if (p.isNull("at_ms") || !p.has("at_ms")) null else p.optLong("at_ms"),
                     notProperty = p.optJSONArray("set_aside_not_property")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                 )
             }
