@@ -1,0 +1,181 @@
+package com.woadivector.proofofloss
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.time.Instant
+import java.util.Locale
+import java.util.UUID
+
+/** One item the model named in a photo. The model names things; it never prices or judges them. */
+data class Spotted(val name: String, val brandModel: String, val clear: Boolean)
+
+/**
+ * One photo taken in the app. The SHA-256 is of the original bytes, computed the moment the
+ * camera hands the file back, and the file is never modified afterwards. [capturedAt] is this
+ * phone's clock at that moment; [recordedAt] is the date inside the photo's own metadata, if any.
+ */
+data class Capture(
+    val sha256: String,
+    val file: String,
+    val room: String,
+    val capturedAt: String,
+    val recordedAt: String?,
+    val items: List<Spotted> = emptyList(),
+    val source: String? = null, // "on_device" or "in_cloud": where the model actually ran
+    val modelMs: Long? = null,
+    val modelError: String? = null,
+)
+
+data class Walk(
+    val walkId: String,
+    val label: String,
+    val startedAt: String,
+    val device: String,
+    val captures: List<Capture>,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("format", "pol-walk-1")
+        .put("walk_id", walkId)
+        .put("label", label)
+        .put("started_at", startedAt)
+        .put("device", device)
+        .put("photos", JSONArray().apply {
+            captures.forEach { c ->
+                put(JSONObject()
+                    .put("file", c.file)
+                    .put("sha256", c.sha256)
+                    .put("room", c.room)
+                    .put("captured_at", c.capturedAt)
+                    .put("recorded_at", c.recordedAt ?: JSONObject.NULL)
+                    .put("provenance", "captured_in_app")
+                    .put("source", c.source ?: JSONObject.NULL)
+                    .put("model_ms", c.modelMs ?: JSONObject.NULL)
+                    .put("model_error", c.modelError ?: JSONObject.NULL)
+                    .put("items", JSONArray().apply {
+                        c.items.forEach {
+                            put(JSONObject().put("name", it.name).put("brand_model", it.brandModel)
+                                .put("clear", it.clear))
+                        }
+                    }))
+            }
+        })
+
+    companion object {
+        fun fromJson(o: JSONObject): Walk {
+            val photos = o.optJSONArray("photos") ?: JSONArray()
+            val caps = (0 until photos.length()).map { i ->
+                val p = photos.getJSONObject(i)
+                val items = p.optJSONArray("items") ?: JSONArray()
+                Capture(
+                    sha256 = p.getString("sha256"),
+                    file = p.getString("file"),
+                    room = p.optString("room"),
+                    capturedAt = p.optString("captured_at"),
+                    recordedAt = p.optStringOrNull("recorded_at"),
+                    items = (0 until items.length()).map { j ->
+                        val it = items.getJSONObject(j)
+                        Spotted(it.optString("name"), it.optString("brand_model"), it.optBoolean("clear"))
+                    },
+                    source = p.optStringOrNull("source"),
+                    modelMs = if (p.isNull("model_ms")) null else p.optLong("model_ms"),
+                    modelError = p.optStringOrNull("model_error"),
+                )
+            }
+            return Walk(o.getString("walk_id"), o.optString("label"), o.optString("started_at"),
+                o.optString("device"), caps)
+        }
+
+        private fun JSONObject.optStringOrNull(k: String): String? =
+            if (!has(k) || isNull(k)) null else optString(k)
+    }
+}
+
+/** The current walk lives in the app's private storage until the adjuster shares it. */
+class WalkStore(root: File) {
+    val dir = File(root, "walks/current").apply { mkdirs() }
+    private val record = File(dir, "walk.json")
+
+    fun load(): Walk? = runCatching { Walk.fromJson(JSONObject(record.readText())) }.getOrNull()
+
+    fun save(w: Walk) {
+        val tmp = File(dir, "walk.json.tmp")
+        tmp.writeText(w.toJson().toString(2))
+        tmp.renameTo(record)
+    }
+
+    fun start(label: String, device: String): Walk {
+        // Keep the previous walk: move it aside, never delete evidence.
+        if (record.exists()) {
+            val old = File(dir.parentFile, "walk_" + System.currentTimeMillis())
+            dir.renameTo(old)
+            dir.mkdirs()
+        }
+        val w = Walk(UUID.randomUUID().toString(), label, Instant.now().toString(), device, emptyList())
+        save(w)
+        return w
+    }
+
+    fun newPhotoFile(): File = File(dir, "pending_${System.currentTimeMillis()}.jpg")
+
+    fun photo(c: Capture): File = File(dir, c.file)
+
+    /** Hash the camera's file, then name it by its hash. Same bytes, same name. */
+    fun accept(pending: File): Pair<String, File> {
+        val sha = sha256(pending)
+        val dest = File(dir, "$sha.jpg")
+        if (dest.exists()) pending.delete() else pending.renameTo(dest)
+        return sha to dest
+    }
+
+    fun recordFile(): File = record
+}
+
+fun sha256(f: File): String {
+    val md = MessageDigest.getInstance("SHA-256")
+    f.inputStream().use { input ->
+        val buf = ByteArray(1 shl 16)
+        while (true) {
+            val n = input.read(buf)
+            if (n <= 0) break
+            md.update(buf, 0, n)
+        }
+    }
+    return md.digest().joinToString("") { "%02x".format(it) }
+}
+
+/** The date the camera wrote into the photo itself (EXIF), or null. Never the file system's time. */
+fun exifDate(f: File): String? = runCatching {
+    val raw = ExifInterface(f.absolutePath).getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: return null
+    val d = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(raw) ?: return null
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).format(d)
+}.getOrNull()
+
+/** A downscaled, upright copy for the model and the screen. The original file is not touched. */
+fun loadScaled(f: File, maxSide: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(f.absolutePath, bounds)
+    if (bounds.outWidth <= 0) return null
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+    val bmp = BitmapFactory.decodeFile(f.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+        ?: return null
+    val rotation = runCatching {
+        when (ExifInterface(f.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+    }.getOrDefault(0f)
+    val scale = minOf(1f, maxSide.toFloat() / maxOf(bmp.width, bmp.height))
+    if (rotation == 0f && scale >= 1f) return bmp
+    val m = Matrix().apply { postScale(scale, scale); postRotate(rotation) }
+    return Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+}
