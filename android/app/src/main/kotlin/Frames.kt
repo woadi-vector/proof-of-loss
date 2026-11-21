@@ -105,3 +105,24 @@ private fun sharpness(b: Bitmap): Double {
     val mean = sum / n
     return sq / n - mean * mean
 }
+
+/**
+ * The sharpest frame within about half a second of a moment the adjuster named something.
+ * Five candidates, one kept; the video is only read.
+ */
+fun pullFrameAt(video: File, outDir: File, ms: Long): PulledFrame? {
+    val r = MediaMetadataRetriever()
+    try {
+        r.setDataSource(video.absolutePath)
+        val duration = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: return null
+        val best = listOf(ms - 600, ms - 300, ms, ms + 300, ms + 600).filter { it in 0 until duration }
+            .mapNotNull { at -> r.frame(at, 320, 180)?.let { at to sharpness(it) } }
+            .maxByOrNull { it.second } ?: return null
+        val full = r.frame(best.first, 1280, 720) ?: return null
+        val f = File(outDir, "pending_said_${best.first}.jpg")
+        f.outputStream().use { full.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        return PulledFrame(best.first, f, best.second)
+    } finally {
+        r.release()
+    }
+}

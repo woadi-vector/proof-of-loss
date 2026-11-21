@@ -15,6 +15,7 @@ data class InventoryLine(
     val name: String,
     val sightings: List<Sighting2>,
     val brandReadings: Map<String, Int>,
+    val said: List<String> = emptyList(), // the adjuster's own words for this item, with brand or year
 ) {
     val clearCount get() = sightings.count { it.clear }
     val bestSha get() = (sightings.firstOrNull { it.clear } ?: sightings.first()).captureSha
@@ -38,10 +39,17 @@ private fun normBrand(b: String) = b.uppercase().replace(Regex("[^A-Z0-9]"), "")
 fun buildInventory(captures: List<Capture>): List<InventoryLine> {
     data class Key(val room: String, val head: String)
     val groups = LinkedHashMap<Key, MutableList<Pair<Spotted, Capture>>>()
+    val saidBy = LinkedHashMap<Key, MutableList<String>>()
     captures.sortedWith(compareBy({ it.fromVideo == null }, { it.atMs ?: 0L })).forEach { c ->
         c.items.forEach { it -> groups.getOrPut(Key(c.room.lowercase(), headWord(it.name))) { mutableListOf() } += it to c }
+        c.said.forEach { s ->
+            val k = Key(c.room.lowercase(), headWord(s.name))
+            saidBy.getOrPut(k) { mutableListOf() } += s.name + if (s.brandModel.isNotBlank()) " (${s.brandModel})" else ""
+            // A named item the camera did not list still gets a line: the frame at that moment is its evidence.
+            if (k !in groups) groups[k] = mutableListOf(Spotted(s.name, "", true) to c)
+        }
     }
-    return groups.map { (_, list) ->
+    return groups.map { (key, list) ->
         // The most common full name stands for the line; the others stay visible as sightings.
         val name = list.groupingBy { it.first.name.lowercase() }.eachCount().maxByOrNull { it.value }!!.key
         val brands = list.map { it.first.brandModel }.filter { it.isNotBlank() }
@@ -51,6 +59,7 @@ fun buildInventory(captures: List<Capture>): List<InventoryLine> {
             name = name,
             sightings = list.map { (s, c) -> Sighting2(c.sha256, c.atMs, s.clear, s.brandModel) }.distinctBy { it.captureSha },
             brandReadings = brands,
+            said = saidBy[key] ?: emptyList(),
         )
     }.sortedWith(compareBy({ it.room }, { -it.sightings.size }))
 }

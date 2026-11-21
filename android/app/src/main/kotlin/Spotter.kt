@@ -101,7 +101,7 @@ fun parseItems(text: String): List<Spotted> {
     return Regex("""\{[^{}]*\}""").findAll(text).mapNotNull { m ->
         val o = runCatching { JSONObject(m.value) }.getOrNull() ?: return@mapNotNull null
         val name = (o.optString("name").ifBlank { o.optString("item") }).trim()
-        if (name.isEmpty()) null else Spotted(name, o.optString("brand_model").trim(), o.optBoolean("clear", true))
+        if (name.isEmpty()) null else Spotted(name, cleanBrand(o.optString("brand_model")), o.optBoolean("clear", true))
     }.toList()
 }
 
@@ -125,9 +125,15 @@ private fun parseWhole(text: String): List<Spotted> {
             is JSONObject -> {
                 val name = (v.optString("name").ifBlank { v.optString("item") }).trim()
                 if (name.isEmpty()) null
-                else Spotted(name, v.optString("brand_model").trim(), v.optBoolean("clear", true))
+                else Spotted(name, cleanBrand(v.optString("brand_model")), v.optBoolean("clear", true))
             }
             else -> null
         }
     }
+}
+
+/** "Unknown", "N/A", "none" and the like are no brand at all. */
+fun cleanBrand(b: String): String {
+    val t = b.trim()
+    return if (t.lowercase().replace(Regex("[^a-z]"), "") in setOf("", "unknown", "na", "none", "unbranded", "generic", "notvisible", "unclear")) "" else t
 }

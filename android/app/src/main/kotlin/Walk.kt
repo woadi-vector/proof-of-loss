@@ -34,6 +34,7 @@ data class Capture(
     val raw: String? = null, // the model's own words when nothing could be read from them
     val setAside: List<String> = emptyList(), // named by the model, but part of the building
     val notProperty: List<String> = emptyList(), // people and animals: not contents
+    val said: List<Spotted> = emptyList(), // named aloud by the adjuster at this frame's moment
     val fromVideo: String? = null, // SHA-256 of the walk video this frame was pulled from
     val atMs: Long? = null, // where in that video
 )
@@ -45,6 +46,9 @@ data class VideoRecord(
     val room: String, // the room selected when recording started; narration names the rest
     val startedAt: String,
     val durationMs: Long,
+    val mentions: List<Mention>? = null, // what the adjuster said; null until the narration is heard
+    val listenSource: String? = null,
+    val listenError: String? = null,
 )
 
 data class Walk(
@@ -71,6 +75,7 @@ data class Walk(
                     .put("recorded_at", c.recordedAt ?: JSONObject.NULL)
                     .put("provenance", if (c.fromVideo != null) "frame_from_video" else "captured_in_app")
                     .put("from_video", c.fromVideo ?: JSONObject.NULL)
+                    .put("said", JSONArray().apply { c.said.forEach { put(JSONObject().put("name", it.name).put("brand_model", it.brandModel)) } })
                     .put("at_ms", c.atMs ?: JSONObject.NULL)
                     .put("source", c.source ?: JSONObject.NULL)
                     .put("model_ms", c.modelMs ?: JSONObject.NULL)
@@ -90,7 +95,13 @@ data class Walk(
             videos.forEach { v ->
                 put(JSONObject().put("file", v.file).put("sha256", v.sha256).put("room", v.room)
                     .put("started_at", v.startedAt).put("duration_ms", v.durationMs)
-                    .put("provenance", "captured_in_app"))
+                    .put("provenance", "captured_in_app")
+                    .put("listen_source", v.listenSource ?: JSONObject.NULL)
+                    .put("listen_error", v.listenError ?: JSONObject.NULL)
+                    .put("mentions", v.mentions?.let { ms -> JSONArray().apply { ms.forEach { m ->
+                        put(JSONObject().put("at_ms", m.atMs).put("kind", m.kind).put("text", m.text)
+                            .put("brand_model", m.brandModel).put("purchase_year", m.purchaseYear ?: JSONObject.NULL)
+                            .put("quantity", m.quantity ?: JSONObject.NULL)) } } } ?: JSONObject.NULL))
             }
         })
 
@@ -116,6 +127,8 @@ data class Walk(
                     raw = p.optStringOrNull("raw"),
                     setAside = p.optJSONArray("set_aside_as_structure")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                     fromVideo = p.optStringOrNull("from_video"),
+                    said = p.optJSONArray("said")?.let { a -> (0 until a.length()).map { j -> val o = a.getJSONObject(j)
+                        Spotted(o.optString("name"), o.optString("brand_model"), true) } } ?: emptyList(),
                     atMs = if (p.isNull("at_ms") || !p.has("at_ms")) null else p.optLong("at_ms"),
                     notProperty = p.optJSONArray("set_aside_not_property")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                 )
@@ -123,8 +136,15 @@ data class Walk(
             val vids = o.optJSONArray("videos") ?: JSONArray()
             val videos = (0 until vids.length()).map { i ->
                 val v = vids.getJSONObject(i)
+                val ms = v.optJSONArray("mentions")?.let { a -> (0 until a.length()).map { j ->
+                    val m = a.getJSONObject(j)
+                    Mention(m.optLong("at_ms"), m.optString("kind"), m.optString("text"), m.optString("brand_model"),
+                        if (m.isNull("purchase_year")) null else m.optInt("purchase_year"),
+                        if (m.isNull("quantity")) null else m.optInt("quantity"))
+                } }
                 VideoRecord(v.getString("sha256"), v.getString("file"), v.optString("room"),
-                    v.optString("started_at"), v.optLong("duration_ms"))
+                    v.optString("started_at"), v.optLong("duration_ms"), ms,
+                    v.optStringOrNull("listen_source"), v.optStringOrNull("listen_error"))
             }
             return Walk(o.getString("walk_id"), o.optString("label"), o.optString("started_at"),
                 o.optString("device"), caps, videos)

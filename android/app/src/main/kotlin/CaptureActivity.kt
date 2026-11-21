@@ -117,6 +117,9 @@ fun WalkScreen(store: WalkStore) {
     }
     var mode by rememberSaveable { mutableStateOf(Mode.PREFER_ON_DEVICE) }
     val spotter = remember(mode) { Spotter(mode) }
+    // Used only when the adjuster asks for it on a frame the on-device model turned down.
+    val cloudSpotter = remember { Spotter(Mode.ONLY_IN_CLOUD) }
+    val listener = remember { Listener() }
     var room by rememberSaveable { mutableStateOf(walk.captures.firstOrNull()?.room?.takeIf { it != "Unnamed room" } ?: "") }
     var modelStatus by remember { mutableStateOf("Checking for Gemini Nano on this phone") }
     var canDownload by remember { mutableStateOf(false) }
@@ -131,27 +134,29 @@ fun WalkScreen(store: WalkStore) {
         update(walk.copy(captures = walk.captures.map { if (it.sha256 == sha) f(it) else it }))
     }
 
-    suspend fun spotOne(sha: String) {
+    suspend fun spotOne(sha: String, cloud: Boolean = false) {
         val c = walk.captures.firstOrNull { it.sha256 == sha } ?: return
         working = working + sha
         try {
             val bmp: Bitmap = withContext(Dispatchers.IO) { loadScaled(store.photo(c), 1024) }
                 ?: throw IllegalStateException("could not read the photo")
-            val r = spotter.spot(bmp)
+            val r = (if (cloud) cloudSpotter else spotter).spot(bmp)
             val (notProp, rest) = r.items.partition { isNotProperty(it.name) }
             val (structure, contents) = rest.partition { isStructure(it.name) }
             replace(sha) { it.copy(items = contents, source = r.source, modelMs = r.ms, modelError = null,
                 raw = if (r.items.isEmpty()) r.raw else null, setAside = structure.map { s -> s.name },
                 notProperty = notProp.map { s -> s.name }) }
         } catch (e: Exception) {
-            replace(sha) { it.copy(modelError = e.message ?: e.javaClass.simpleName) }
+            val msg = e.message ?: e.javaClass.simpleName
+            replace(sha) { it.copy(modelError = if ("policy" in msg.lowercase())
+                "the on-device model declined this frame (its safety filter). $msg" else msg) }
         } finally {
             working = working - sha
         }
     }
 
-    fun look(sha: String) {
-        scope.launch { spotOne(sha) }
+    fun look(sha: String, cloud: Boolean = false) {
+        scope.launch { spotOne(sha, cloud) }
     }
 
     var pulling by remember { mutableStateOf<String?>(null) } // video sha being processed
@@ -187,6 +192,66 @@ fun WalkScreen(store: WalkStore) {
             } catch (e: Exception) {
                 pullNote = "Could not pull frames: ${e.message}"
             } finally {
+                pulling = null
+            }
+        }
+    }
+
+    fun listen(v: VideoRecord) {
+        pulling = v.sha256
+        scope.launch {
+            val audio = File(store.dir, "listen_${v.sha256.take(12)}.m4a")
+            try {
+                pullNote = "Copying the narration out of the video"
+                val ok = withContext(Dispatchers.IO) { extractAudio(store.video(v), audio) }
+                if (!ok) throw IllegalStateException("this video has no audio track")
+                pullNote = "Listening in the cloud (needs signal)"
+                val mentions = listener.listen(audio)
+                update(walk.copy(videos = walk.videos.map {
+                    if (it.sha256 == v.sha256) it.copy(mentions = mentions, listenSource = "in_cloud", listenError = null) else it }))
+                // Rooms follow what the adjuster said, frame by frame.
+                update(walk.copy(captures = walk.captures.map { c ->
+                    if (c.fromVideo == v.sha256 && c.atMs != null) c.copy(room = roomAt(c.atMs, mentions, v.room)) else c }))
+                // Every item named aloud gets a frame from that moment: the nearest pulled frame,
+                // or a new one, the sharpest within half a second.
+                val items = mentions.filter { it.kind == "item" }
+                val start = runCatching { Instant.parse(v.startedAt) }.getOrNull()
+                val toRead = mutableListOf<String>()
+                items.forEachIndexed { i, m ->
+                    pullNote = "Finding the frame for \"${m.text}\" (${i + 1} of ${items.size})"
+                    val said = Spotted(m.text, listOfNotNull(m.brandModel.takeIf { it.isNotBlank() },
+                        m.purchaseYear?.let { y -> "bought $y" }, m.quantity?.let { q -> "qty $q" }).joinToString(", "), true)
+                    val near = walk.captures.filter { it.fromVideo == v.sha256 && it.atMs != null }
+                        .minByOrNull { kotlin.math.abs(it.atMs!! - m.atMs) }
+                    if (near != null && kotlin.math.abs(near.atMs!! - m.atMs) <= 1500) {
+                        replace(near.sha256) { it.copy(said = (it.said + said).distinct()) }
+                    } else {
+                        val fr = withContext(Dispatchers.IO) { pullFrameAt(store.video(v), store.dir, m.atMs) }
+                        if (fr != null) {
+                            val (sha, file) = withContext(Dispatchers.IO) { store.accept(fr.file) }
+                            val existing = walk.captures.firstOrNull { it.sha256 == sha }
+                            if (existing != null) replace(sha) { it.copy(said = (it.said + said).distinct()) }
+                            else {
+                                update(walk.copy(captures = walk.captures + Capture(
+                                    sha256 = sha, file = file.name, room = roomAt(fr.ms, mentions, v.room),
+                                    capturedAt = (start?.plusMillis(fr.ms) ?: Instant.now()).toString(),
+                                    recordedAt = null, fromVideo = v.sha256, atMs = fr.ms, said = listOf(said))))
+                                toRead += sha
+                            }
+                        }
+                    }
+                }
+                toRead.forEachIndexed { i, sha ->
+                    pullNote = "Reading named frame ${i + 1} of ${toRead.size}"
+                    spotOne(sha)
+                }
+                pullNote = "Heard ${mentions.count { it.kind == "room" }} rooms and ${items.size} named items"
+            } catch (e: Exception) {
+                val msg = e.message ?: e.javaClass.simpleName
+                update(walk.copy(videos = walk.videos.map { if (it.sha256 == v.sha256) it.copy(listenError = msg) else it }))
+                pullNote = "Could not hear the narration: $msg"
+            } finally {
+                audio.delete() // a working copy only; the video keeps the original
                 pulling = null
             }
         }
@@ -331,8 +396,23 @@ fun WalkScreen(store: WalkStore) {
                         if (pulling == v.sha256) Text(pullNote, style = MaterialTheme.typography.bodySmall)
                         else {
                             if (frameCount > 0) Text("$frameCount frames from this video", style = MaterialTheme.typography.bodySmall)
-                            OutlinedButton(onClick = { pull(v) }, enabled = pulling == null) {
-                                Text(if (frameCount == 0) "Pull frames" else "Pull frames again")
+                            if (pullNote.isNotEmpty()) Text(pullNote, style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { pull(v) }, enabled = pulling == null) {
+                                    Text(if (frameCount == 0) "Pull frames" else "Pull again")
+                                }
+                                OutlinedButton(onClick = { listen(v) }, enabled = pulling == null) {
+                                    Text(if (v.mentions == null) "Hear narration" else "Hear again")
+                                }
+                            }
+                            v.listenError?.let { Text("Narration not heard yet: $it", color = WARN, style = MaterialTheme.typography.bodySmall) }
+                            v.mentions?.let { ms ->
+                                Text(if (ms.isEmpty()) "Narration heard in the cloud: nothing named."
+                                    else "Narration heard in the cloud: " + ms.joinToString(" · ") { m ->
+                                        "${fmt(m.atMs)} " + (if (m.kind == "room") "[${canonicalRoom(m.text)}]" else m.text) +
+                                            (if (m.brandModel.isNotBlank()) " (${m.brandModel})" else "") +
+                                            (m.purchaseYear?.let { y -> ", bought $y" } ?: "") },
+                                    style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -357,6 +437,8 @@ fun WalkScreen(store: WalkStore) {
                                     if (ln.clearCount < ln.sightings.size) append("; ${ln.clearCount} clear")
                                     append(")")
                                 }, style = MaterialTheme.typography.bodySmall)
+                                if (ln.said.isNotEmpty()) Text("   said: " + ln.said.distinct().joinToString("; "),
+                                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                                 if (ln.brandReadings.isNotEmpty()) {
                                     // A brand read only once is never treated as the brand: small text blurs in video.
                                     val agreed = ln.brandReadings.entries.size == 1 && ln.brandReadings.values.first() >= 2
@@ -372,7 +454,7 @@ fun WalkScreen(store: WalkStore) {
                 }
             }
             items(walk.captures.sortedWith(compareBy({ it.fromVideo != null }, { it.atMs ?: 0L })), key = { it.sha256 }) { c ->
-                CaptureCard(c, store.photo(c), c.sha256 in working) { look(c.sha256) }
+                CaptureCard(c, store.photo(c), c.sha256 in working, onCloud = { look(c.sha256, cloud = true) }) { look(c.sha256) }
             }
             item {
                 TextButton(onClick = {
@@ -395,7 +477,7 @@ fun SourceTag(source: String?) {
 }
 
 @Composable
-fun CaptureCard(c: Capture, file: File, busy: Boolean, onRetry: () -> Unit) {
+fun CaptureCard(c: Capture, file: File, busy: Boolean, onCloud: () -> Unit = {}, onRetry: () -> Unit) {
     val thumb by produceState<Bitmap?>(null, file) {
         value = withContext(Dispatchers.IO) { loadScaled(file, 400) }
     }
@@ -421,6 +503,7 @@ fun CaptureCard(c: Capture, file: File, busy: Boolean, onRetry: () -> Unit) {
                 when {
                     busy -> Text("Looking at the photo…", style = MaterialTheme.typography.bodySmall)
                     c.modelError != null -> {
+                        TextButton(onClick = onCloud) { Text("Read in the cloud") }
                         Text("Not read yet: ${c.modelError}", color = WARN, style = MaterialTheme.typography.bodySmall)
                         TextButton(onClick = onRetry) { Text("Look again") }
                     }
@@ -441,6 +524,10 @@ fun CaptureCard(c: Capture, file: File, busy: Boolean, onRetry: () -> Unit) {
                             color = if (it2.clear) MaterialTheme.colorScheme.onSurface else WARN,
                         )
                     }
+                }
+                if (c.said.isNotEmpty()) {
+                    Text("Named aloud here: " + c.said.joinToString(", ") { it.name + if (it.brandModel.isNotBlank()) " (${it.brandModel})" else "" },
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 }
                 if (c.notProperty.isNotEmpty()) {
                     Text("Set aside, not property: ${c.notProperty.joinToString(", ")}",
