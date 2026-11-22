@@ -301,6 +301,38 @@ fun WalkScreen(store: WalkStore) {
         }
     }
 
+    // A walk recorded on Meta glasses, saved to this phone by the Meta AI app. It is copied in
+    // byte for byte and hashed on receipt; its recorded date comes from the video's own metadata.
+    fun importGlassesVideo(uri: Uri) {
+        scope.launch {
+            pullNote = "Copying the glasses video into the walk"
+            val pending = store.newVideoFile()
+            val name = runCatching {
+                ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            }.getOrNull()
+            val copied = withContext(Dispatchers.IO) {
+                runCatching {
+                    ctx.contentResolver.openInputStream(uri)!!.use { input ->
+                        pending.outputStream().use { input.copyTo(it, 1 shl 20) }
+                    }
+                }.isSuccess
+            }
+            if (!copied || pending.length() == 0L) { pending.delete(); pullNote = "Could not read that video"; return@launch }
+            val (sha, file) = withContext(Dispatchers.IO) { store.acceptVideo(pending) }
+            val (recorded, ms) = withContext(Dispatchers.IO) { videoMeta(file) }
+            if (walk.videos.none { it.sha256 == sha }) {
+                update(walk.copy(videos = listOf(VideoRecord(sha, file.name, room.trim(),
+                    startedAt = recorded ?: Instant.now().toString(), durationMs = ms,
+                    provenance = "from_glasses", recordedAt = recorded, sourceName = name)) + walk.videos))
+            }
+            pullNote = ""
+        }
+    }
+    val pickGlassesVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) importGlassesVideo(uri)
+    }
+
     if (cameraOpen) {
         CameraScreen(
             room = room,
@@ -383,13 +415,25 @@ fun WalkScreen(store: WalkStore) {
                     OutlinedButton(onClick = { share() }, enabled = walk.captures.isNotEmpty() || walk.videos.isNotEmpty()) { Text("Share walk") }
                 }
             }
+            item {
+                OutlinedButton(
+                    onClick = { pickGlassesVideo.launch(androidx.activity.result.PickVisualMediaRequest(
+                        ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                    enabled = room.isNotBlank(), modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (room.isBlank()) "Choose a room first" else "Add a walk recorded on Meta glasses") }
+            }
             items(walk.videos, key = { it.sha256 }) { v ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("Walk video · ${v.room}", fontWeight = FontWeight.SemiBold)
-                        Text("Captured in app · ${v.startedAt.take(16).replace('T', ' ')} UTC · " +
-                            "${v.durationMs / 60000}:${"%02d".format((v.durationMs / 1000) % 60)}",
+                        val len = "${v.durationMs / 60000}:${"%02d".format((v.durationMs / 1000) % 60)}"
+                        Text(if (v.provenance == "from_glasses")
+                                "Received from glasses · recorded ${v.recordedAt?.take(16)?.replace('T', ' ')?.plus(" UTC") ?: "date not in the file"} · $len"
+                            else "Captured in app · ${v.startedAt.take(16).replace('T', ' ')} UTC · $len",
                             style = MaterialTheme.typography.bodySmall)
+                        if (v.provenance == "from_glasses") Text(
+                            "Hashed when this phone received it${v.sourceName?.let { " ($it)" } ?: ""}, not when the glasses recorded it.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("SHA-256 ${v.sha256.take(16)}…", fontFamily = FontFamily.Monospace, fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("Kept unchanged for review. Frames are copies; the video is never edited.",

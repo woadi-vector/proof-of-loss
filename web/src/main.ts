@@ -159,7 +159,7 @@ function walkPanel(): string {
   const inCloud = fromWalk.filter((p) => p.source === "in_cloud").length;
   return `<div class="walk">
     <div class="vsum ${bad.length ? "warn" : "ok"}">
-      <b>${v.matched} of ${v.total}</b> files match the SHA-256 the phone recorded at capture.
+      <b>${v.matched} of ${v.total}</b> files match the SHA-256 the phone recorded.
       ${(() => {
         const changed = bad.filter((f) => f.status === "changed").length;
         const missing = bad.length - changed;
@@ -184,7 +184,12 @@ function videoCard(v: WalkVideo): string {
   return `<div class="video">
     ${url ? `<video src="${url}" controls preload="metadata"></video>` : `<div class="novideo muted">Video not received or does not match its hash</div>`}
     <div class="pmeta">
-      <div><b>Walk video · ${esc(v.room)}</b> · Captured in app · ${clock(v.duration_ms)}</div>
+      <div><b>Walk video · ${esc(v.room)}</b> · ${v.provenance === "from_glasses"
+        ? `Received from glasses · recorded ${v.recorded_at ? esc(v.recorded_at.slice(0, 16).replace("T", " ")) + " UTC" : "(date not in the file)"}`
+        : "Captured in app"} · ${clock(v.duration_ms)}</div>
+      <div class="muted">${v.provenance === "from_glasses"
+        ? `Hashed when the phone received it${v.source_name ? ` (${esc(v.source_name)})` : ""}, not when the glasses recorded it.`
+        : "Hashed on the phone the moment recording stopped."}</div>
       <div class="mono" title="${v.sha256}">SHA-256 ${v.sha256.slice(0, 16)}…</div>
       ${v.mentions ? `<div><span class="src in_cloud">Cloud</span> Heard: ${said || "nothing named"}</div>` :
         `<div class="muted">Narration not heard on the phone yet.</div>`}

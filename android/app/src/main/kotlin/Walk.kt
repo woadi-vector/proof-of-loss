@@ -50,6 +50,12 @@ data class VideoRecord(
     val listenSource: String? = null,
     val listenError: String? = null,
     val transcript: String? = null, // every word the cloud heard, as it wrote it down
+    // "captured_in_app": hashed the moment recording stopped. "from_glasses": recorded on the
+    // glasses and hashed when this app received it, so the hash proves nothing about the file's
+    // life before that moment.
+    val provenance: String = "captured_in_app",
+    val recordedAt: String? = null, // the date inside the video's own metadata, if any
+    val sourceName: String? = null, // the file name it arrived under, for tracing it back
 )
 
 data class Walk(
@@ -96,7 +102,10 @@ data class Walk(
             videos.forEach { v ->
                 put(JSONObject().put("file", v.file).put("sha256", v.sha256).put("room", v.room)
                     .put("started_at", v.startedAt).put("duration_ms", v.durationMs)
-                    .put("provenance", "captured_in_app")
+                    .put("provenance", v.provenance)
+                    .put("hashed", if (v.provenance == "captured_in_app") "at_capture" else "on_receipt")
+                    .put("recorded_at", v.recordedAt ?: JSONObject.NULL)
+                    .put("source_name", v.sourceName ?: JSONObject.NULL)
                     .put("listen_source", v.listenSource ?: JSONObject.NULL)
                     .put("listen_error", v.listenError ?: JSONObject.NULL)
                     .put("transcript", v.transcript ?: JSONObject.NULL)
@@ -147,7 +156,9 @@ data class Walk(
                 VideoRecord(v.getString("sha256"), v.getString("file"), v.optString("room"),
                     v.optString("started_at"), v.optLong("duration_ms"), ms,
                     v.optStringOrNull("listen_source"), v.optStringOrNull("listen_error"),
-                    v.optStringOrNull("transcript"))
+                    v.optStringOrNull("transcript"),
+                    v.optString("provenance", "captured_in_app").ifBlank { "captured_in_app" },
+                    v.optStringOrNull("recorded_at"), v.optStringOrNull("source_name"))
             }
             return Walk(o.getString("walk_id"), o.optString("label"), o.optString("started_at"),
                 o.optString("device"), caps, videos)
@@ -221,6 +232,31 @@ fun sha256(f: File): String {
         }
     }
     return md.digest().joinToString("") { "%02x".format(it) }
+}
+
+/**
+ * What a video says about itself: the recording date written into its metadata (never the
+ * file system's time) and its length.
+ */
+fun videoMeta(f: File): Pair<String?, Long> {
+    val r = android.media.MediaMetadataRetriever()
+    return try {
+        r.setDataSource(f.absolutePath)
+        val raw = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DATE)
+        val date = raw?.let { d ->
+            runCatching {
+                val fmt = SimpleDateFormat("yyyyMMdd'T'HHmmss.SSS'Z'", Locale.US)
+                fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                fmt.parse(d)?.toInstant()?.toString()
+            }.getOrNull()
+        }?.takeIf { !it.startsWith("1904") && !it.startsWith("1970") } // empty containers report the epoch
+        val ms = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        date to ms
+    } catch (e: Exception) {
+        null to 0L
+    } finally {
+        r.release()
+    }
 }
 
 /** The date the camera wrote into the photo itself (EXIF), or null. Never the file system's time. */

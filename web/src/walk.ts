@@ -34,6 +34,9 @@ export interface WalkVideo {
   started_at: string;
   duration_ms: number;
   listen_source: string | null;
+  provenance: string; // "captured_in_app" | "from_glasses"
+  recorded_at: string | null; // from the video's own metadata
+  source_name: string | null;
   transcript: string | null;
   mentions: WalkMention[] | null;
 }
@@ -89,6 +92,9 @@ export function readWalk(text: string): WalkRecord {
     started_at: str(v.started_at),
     duration_ms: numOrNull(v.duration_ms) ?? 0,
     listen_source: strOrNull(v.listen_source),
+    provenance: str(v.provenance, "captured_in_app") || "captured_in_app",
+    recorded_at: strOrNull(v.recorded_at),
+    source_name: strOrNull(v.source_name),
     transcript: strOrNull(v.transcript),
     mentions: Array.isArray(v.mentions) ? v.mentions.map((m: any) => ({
       at_ms: numOrNull(m.at_ms) ?? 0, kind: str(m.kind), text: str(m.text), brand_model: str(m.brand_model),

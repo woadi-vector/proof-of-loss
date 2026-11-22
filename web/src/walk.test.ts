@@ -27,6 +27,7 @@ describe("readWalk", () => {
     expect(w.photos[0].set_aside_not_property).toEqual(["dog"]);
     expect(w.photos[2].room).toBe("Unknown room");
     expect(w.videos[0].mentions?.[0].text).toBe("computer monitor");
+    expect(w.videos[0].provenance).toBe("captured_in_app"); // older walks without the field
   });
   it("refuses a file that is not a walk", () => {
     expect(() => readWalk("{}")).toThrow(/not a Proof of Loss walk/);
