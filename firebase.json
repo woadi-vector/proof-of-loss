@@ -7,5 +7,10 @@
       "ignore": ["venv", ".git", "__pycache__", "*.pyc"],
       "predeploy": ["python scripts/sync_functions.py"]
     }
-  ]
+  ],
+  "hosting": {
+    "public": "web/dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "predeploy": ["npm --prefix web ci", "npm --prefix web run build"]
+  }
 }
