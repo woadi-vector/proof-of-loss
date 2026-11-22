@@ -5,7 +5,7 @@ import { initializeApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from "firebase/app-check";
 import { getAI, GoogleAIBackend } from "firebase/ai";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { firebaseConfig, FUNCTIONS_REGION } from "./config";
+import { firebaseConfig, FUNCTIONS_REGION, RECAPTCHA_SITE_KEY } from "./config";
 import type { PriceResponse } from "./workbook";
 
 export const app = initializeApp(firebaseConfig);
@@ -20,14 +20,14 @@ declare global {
 // Manage debug tokens). In a deployed build the reCAPTCHA Enterprise key is used.
 export let appCheck: AppCheck | null = null;
 export let appCheckNote = "";
-const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined;
+const siteKey = (import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined) || RECAPTCHA_SITE_KEY;
 if (import.meta.env.DEV) self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
 if (siteKey || import.meta.env.DEV) {
   appCheck = initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider(siteKey || "debug-only"),
     isTokenAutoRefreshEnabled: true,
   });
-  appCheckNote = siteKey ? "App Check on" : "App Check debug token";
+  appCheckNote = import.meta.env.DEV ? "App Check debug token" : "App Check on (reCAPTCHA Enterprise)";
 } else {
   appCheckNote = "App Check not configured: set VITE_RECAPTCHA_SITE_KEY";
 }

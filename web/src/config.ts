@@ -13,5 +13,9 @@ export const firebaseConfig = {
 // hybrid inference falls back to it).
 export const CLOUD_MODEL = "gemini-3.5-flash-lite";
 
+// reCAPTCHA Enterprise site key for App Check on the hosted review page. Public by
+// design: it identifies the site to reCAPTCHA and sits in every page that uses it.
+export const RECAPTCHA_SITE_KEY = "6LdsQi0uAAAAAPN-6r17AkAv9ytm_2lQd8E9m613";
+
 // Region of the check_claim Cloud Function (functions/main.py).
 export const FUNCTIONS_REGION = "us-central1";
