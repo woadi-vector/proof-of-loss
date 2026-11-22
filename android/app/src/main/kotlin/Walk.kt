@@ -308,6 +308,7 @@ private val STRUCTURE = setOf(
     "closet door", "closet doors", "carpet", "hardwood floor", "tile", "drywall", "stairs", "railing",
     "ceiling fan", "smoke detector", "thermostat",
     "door handle", "door knob", "doorknob", "door hardware", "hardware", "hinge", "hinges", "lock", "deadbolt",
+    "wiring", "electrical wiring", "electrical outlet", "wall outlet", "electrical box", "junction box",
 )
 
 fun isStructure(name: String): Boolean =
@@ -317,7 +318,7 @@ fun isStructure(name: String): Boolean =
     }
 
 private fun isStructurePart(name: String): Boolean {
-    val n = name.lowercase().replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ").trim()
+    val n = withoutBrackets(name).lowercase().replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ").trim()
     if (n in STRUCTURE) return true
     val last = n.substringAfterLast(' ')
     return last in setOf("wall", "door", "doors", "window", "windows", "floor", "ceiling", "vent", "outlet", "baseboard", "trim")
@@ -330,4 +331,10 @@ private val NOT_PROPERTY = setOf(
 
 /** People and animals are not contents. Set aside and shown, like building parts. */
 fun isNotProperty(name: String): Boolean =
-    name.lowercase().replace(Regex("[^a-z ]"), " ").trim().split(Regex("\\s+")).lastOrNull() in NOT_PROPERTY
+    // "dog (brown)": the words in brackets describe the thing; they are not the thing.
+    withoutBrackets(name).split('/', ',', '&').filter { it.isNotBlank() }.all { part ->
+        part.lowercase().replace(Regex("[^a-z ]"), " ").trim().split(Regex("\\s+")).lastOrNull() in NOT_PROPERTY
+    }
+
+/** "dog (brown)" -> "dog". */
+fun withoutBrackets(name: String): String = name.replace(Regex("\\([^)]*\\)"), " ").trim()

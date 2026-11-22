@@ -36,6 +36,8 @@ For each item give:
 - brand_model: the brand and model only if you can read them on the item; otherwise ""
 - clear: true only if the photo shows the item well enough for someone to identify it later
 Do not guess brands. Do not estimate value, age or damage. Do not list walls, floors, windows or people.
+List only physical things in the room. Never list anything shown on a TV, monitor, phone or other screen,
+or in a picture or poster: name the screen or picture itself, not what it shows.
 Answer only with JSON: {"items":[{"name":"...","brand_model":"...","clear":true}]}"""
 
 /**

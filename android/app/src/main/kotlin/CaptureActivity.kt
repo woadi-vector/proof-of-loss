@@ -14,6 +14,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -565,10 +567,20 @@ fun WalkScreen(store: WalkStore) {
                         else {
                             if (frameCount > 0) Text("$frameCount frames from this video", style = MaterialTheme.typography.bodySmall)
                             if (pullNote.isNotEmpty()) Text(pullNote, style = MaterialTheme.typography.bodySmall)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.horizontalScroll(rememberScrollState())) {
                                 OutlinedButton(onClick = { pull(v) }, enabled = pulling == null) {
                                     Text(if (frameCount == 0) "Pull frames" else "Pull again")
                                 }
+                                if (frameCount > 0) OutlinedButton(onClick = {
+                                    scope.launch {
+                                        pulling = v.sha256
+                                        val shas = walk.captures.filter { it.fromVideo == v.sha256 }.map { it.sha256 }
+                                        shas.forEachIndexed { i, sha -> pullNote = "Reading frame ${i + 1} of ${shas.size} again"; spotOne(sha) }
+                                        pullNote = "${shas.size} frames read again"
+                                        pulling = null
+                                    }
+                                }, enabled = pulling == null) { Text("Read again") }
                                 OutlinedButton(onClick = { listen(v) }, enabled = pulling == null) {
                                     Text(if (v.mentions == null) "Hear narration" else "Hear again")
                                 }
@@ -600,6 +612,18 @@ fun WalkScreen(store: WalkStore) {
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         inventory.groupBy { it.room }.forEach { (r, lines) ->
                             Text(r, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                            // What code kept off the list in this room, and why: shown, never silently dropped.
+                            val inRoom = walk.captures.filter { it.room.equals(r, ignoreCase = true) }
+                            val aside = (inRoom.flatMap { c -> c.setAside + c.items.filter { isStructure(it.name) }.map { it.name } }
+                                .map { withoutBrackets(it).lowercase() }.groupingBy { it }.eachCount() to
+                                inRoom.flatMap { c -> c.notProperty + c.items.filter { isNotProperty(it.name) }.map { it.name } }
+                                .map { withoutBrackets(it).lowercase() }.groupingBy { it }.eachCount())
+                            fun fmtAside(m: Map<String, Int>) = m.entries.sortedByDescending { it.value }
+                                .joinToString(", ") { (k, n) -> if (n > 1) "$k ×$n" else k }
+                            if (aside.first.isNotEmpty()) Text("   Set aside as part of the building: ${fmtAside(aside.first)}",
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (aside.second.isNotEmpty()) Text("   Set aside, not property: ${fmtAside(aside.second)}",
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             lines.forEach { ln ->
                                 val times = ln.sightings.mapNotNull { it.atMs }.sorted()
                                 val span = if (times.isNotEmpty()) ", ${fmt(times.first())} to ${fmt(times.last())}" else ""

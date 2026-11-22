@@ -21,11 +21,16 @@ data class InventoryLine(
     val bestSha get() = (sightings.firstOrNull { it.clear } ?: sightings.first()).captureSha
 }
 
+/** Words that name the same kind of thing. Kept short on purpose: only plain equivalents. */
+private val SAME_THING = mapOf("tv" to "television", "tvs" to "television", "televisions" to "television",
+    "couch" to "sofa", "couches" to "sofa", "fridge" to "refrigerator")
+
 private val GENERIC = setOf("box", "unit", "item", "thing", "object", "frame", "set", "piece", "equipment")
 
 /** The word a name is about: the last meaningful word, singular ("storage boxes" -> "box"). */
 fun headWord(name: String): String {
-    val words = name.lowercase().replace(Regex("[^a-z ]"), " ").trim().split(Regex("\\s+")).filter { it.length > 1 }
+    val words = withoutBrackets(name).lowercase().replace(Regex("[^a-z ]"), " ").trim().split(Regex("\\s+"))
+        .filter { it.length > 1 }.map { SAME_THING[it] ?: it }
     if (words.isEmpty()) return name.lowercase()
     val singular = words.map { if (it.length > 3 && it.endsWith("es") && !it.endsWith("ses")) it.dropLast(2)
         else if (it.length > 3 && it.endsWith("s")) it.dropLast(1) else it }
@@ -43,7 +48,7 @@ fun buildInventory(captures: List<Capture>): List<InventoryLine> {
     val groups = LinkedHashMap<Key, MutableList<Pair<Spotted, Capture>>>()
     val saidBy = LinkedHashMap<Key, MutableList<String>>()
     captures.sortedWith(compareBy({ it.fromVideo == null }, { it.atMs ?: 0L })).forEach { c ->
-        c.items.forEach { it -> groups.getOrPut(Key(c.room.lowercase(), headWord(it.name))) { mutableListOf() } += it to c }
+        c.items.filterNot { isStructure(it.name) || isNotProperty(it.name) }.forEach { it -> groups.getOrPut(Key(c.room.lowercase(), headWord(it.name))) { mutableListOf() } += it to c }
         c.said.forEach { s ->
             val k = Key(c.room.lowercase(), headWord(s.name))
             // Each mention keeps its moment, so two monitors named at 0:05 and 0:33 stay two mentions.
