@@ -150,3 +150,18 @@ th { font-size: 12px; color: var(--muted); font-weight: 600; }
   .photo { grid-template-columns: 1fr; }
   .top { align-items: flex-start; }
 }
+
+/* A walk shared from the phone */
+.walk { margin: 12px 0; display: grid; gap: 10px; }
+.vsum { padding: 10px 12px; border-radius: 8px; }
+.vsum.ok { background: var(--ok-bg); color: var(--ok); }
+.vsum.warn { background: var(--bad-bg); color: var(--bad); }
+.walk ul.bad { margin: 0; padding-left: 18px; }
+.chip.err { background: var(--bad-bg); color: var(--bad); }
+.src.said { background: var(--warn-bg); color: var(--warn); }
+.video { display: grid; grid-template-columns: minmax(0, 320px) 1fr; gap: 12px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.video video { width: 100%; border-radius: 6px; background: #000; }
+.video .novideo { padding: 24px; text-align: center; border: 1px dashed var(--line); border-radius: 6px; }
+.video details p { margin: 6px 0 0; line-height: 1.5; }
+@media (max-width: 640px) { .video { grid-template-columns: 1fr; } }

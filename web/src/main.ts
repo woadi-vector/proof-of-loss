@@ -7,6 +7,7 @@ import {
 import { secondLook, spotItems, type Mode } from "./ai";
 import { appCheckNote, checkClaim, type CheckResult, type LineResult, type Valuation } from "./firebase";
 import { sha256Hex } from "./hash";
+import { clock, readWalk, verifyWalk, type Verification, type WalkRecord, type WalkVideo } from "./walk";
 
 // ------------------------------------------------------------- state ----
 
@@ -25,6 +26,9 @@ const state = {
   mode: "prefer_on_device" as Mode,
   log: [] as { what: string; source: string; ms: number; ok: boolean }[],
   result: null as CheckResult | null,
+  walk: null as WalkRecord | null,
+  verification: null as Verification | null,
+  videoUrls: new Map<string, string>(),
   busy: "",
   error: "",
 };
@@ -39,9 +43,10 @@ function esc(s: unknown): string {
 const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "none" : `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const SOURCE_LABEL: Record<string, string> = { on_device: "On device", in_cloud: "Cloud" };
+const SOURCE_LABEL: Record<string, string> = { on_device: "On device", in_cloud: "Cloud", said: "Named aloud" };
 const PROVENANCE_LABEL: Record<Provenance, string> = {
   captured_in_app: "Captured in app",
+  frame_from_video: "Frame from the walk video",
   from_glasses: "Received from glasses",
   uploaded: "Uploaded",
 };
@@ -94,6 +99,91 @@ async function addPhotos(files: FileList, room: string, provenance: Provenance) 
     render();
     await spot(sha);
   }
+}
+
+// A walk shared from the phone. Every file is hashed again here and compared with
+// the hash the phone recorded at capture. Only files that match become evidence;
+// the phone's own readings come with them, so nothing is sent to a model again.
+async function addWalk(files: FileList) {
+  state.error = "";
+  const all = Array.from(files);
+  const record = all.find((f) => f.name.toLowerCase().endsWith(".json"));
+  if (!record) { state.error = "Pick walk.json together with the photos and video the phone shared."; render(); return; }
+  let walk: WalkRecord;
+  try { walk = readWalk(await record.text()); } catch (e) { state.error = `Could not open the walk: ${(e as Error).message}`; render(); return; }
+  const received = new Map<string, string>();
+  const byName = new Map<string, File>();
+  for (const [i, f] of all.filter((f) => f !== record).entries()) {
+    state.busy = `Checking file ${i + 1} of ${all.length - 1} against the hash recorded on the phone`;
+    render();
+    received.set(f.name, await sha256Hex(f));
+    byName.set(f.name, f);
+  }
+  const ver = verifyWalk(walk, received);
+  state.walk = walk;
+  state.verification = ver;
+  const ok = new Set(ver.files.filter((f) => f.status === "matches").map((f) => f.file));
+  for (const v of walk.videos) if (ok.has(v.file)) state.videoUrls.set(v.sha256, URL.createObjectURL(byName.get(v.file)!));
+  const taken = new Set(state.items.map((i) => i.lineId).filter(Boolean) as string[]);
+  for (const p of walk.photos) {
+    if (!ok.has(p.file) || state.photos.some((x) => x.sha256 === p.sha256)) continue;
+    const file = byName.get(p.file)!;
+    state.photos.push({
+      sha256: p.sha256, name: p.file, room: p.room,
+      provenance: p.provenance === "frame_from_video" ? "frame_from_video" : "captured_in_app",
+      recordedAt: p.recorded_at, url: URL.createObjectURL(file), atMs: p.at_ms, phoneSource: p.source,
+      setAside: [...p.set_aside_as_structure, ...p.set_aside_not_property],
+    });
+    state.files.set(p.sha256, file);
+    const add = (name: string, brand: string, clear: boolean, source: string, n: string) => {
+      const lineId = suggestLine({ name, brand_model: brand }, p.room, state.lines, taken);
+      if (lineId) taken.add(lineId);
+      state.items.push({ id: `${p.sha256.slice(0, 8)}-${n}`, photoSha: p.sha256, name, brand_model: brand,
+        clear, lineId, source });
+    };
+    p.items.forEach((it, n) => add(it.name, it.brand_model, it.clear, p.source ?? "", String(n)));
+    p.said.forEach((s, n) => add(s.name, s.brand_model, true, "said", `s${n}`));
+  }
+  state.busy = "";
+  state.result = null;
+  render();
+}
+
+function walkPanel(): string {
+  const w = state.walk, v = state.verification;
+  if (!w || !v) return "";
+  const bad = v.files.filter((f) => f.status !== "matches");
+  const fromWalk = w.photos.filter((p) => v.files.some((f) => f.file === p.file && f.status === "matches"));
+  const onDevice = fromWalk.filter((p) => p.source === "on_device").length;
+  const inCloud = fromWalk.filter((p) => p.source === "in_cloud").length;
+  return `<div class="walk">
+    <div class="vsum ${bad.length ? "warn" : "ok"}">
+      <b>${v.matched} of ${v.total}</b> files match the SHA-256 the phone recorded at capture.
+      ${bad.length ? `${bad.length} ${bad.length === 1 ? "does" : "do"} not, and ${bad.length === 1 ? "is" : "are"} not used as evidence.` : ""}
+    </div>
+    <p class="muted">Walk ${esc(w.label || w.walk_id)} · ${esc(w.device)} · started ${esc(w.started_at.slice(0, 16).replace("T", " "))} UTC ·
+      the phone read ${onDevice} on device and ${inCloud} in the cloud.</p>
+    ${bad.length ? `<ul class="bad">${bad.map((f) => `<li><span class="chip ${f.status === "changed" ? "err" : "warn"}">${
+      f.status === "changed" ? "Does not match" : "Not received"}</span> ${esc(f.file)}${
+      f.status === "changed" ? ` <span class="mono muted">recorded ${f.recorded.slice(0, 12)}…, received ${f.actual!.slice(0, 12)}…</span>` : ""}</li>`).join("")}</ul>` : ""}
+    ${v.extra.length ? `<p class="muted">Not named in walk.json, so not used: ${v.extra.map(esc).join(", ")}</p>` : ""}
+    ${w.videos.map((vid) => videoCard(vid)).join("")}
+  </div>`;
+}
+
+function videoCard(v: WalkVideo): string {
+  const url = state.videoUrls.get(v.sha256);
+  const said = (v.mentions ?? []).map((m) => `${clock(m.at_ms)} ${m.kind === "room" ? `[${esc(m.text)}]` : esc(m.text)}${
+    m.brand_model ? ` (${esc(m.brand_model)})` : ""}${m.purchase_year ? `, bought ${m.purchase_year}` : ""}`).join(" · ");
+  return `<div class="video">
+    ${url ? `<video src="${url}" controls preload="metadata"></video>` : `<div class="novideo muted">Video not received or does not match its hash</div>`}
+    <div class="pmeta">
+      <div><b>Walk video · ${esc(v.room)}</b> · Captured in app · ${clock(v.duration_ms)}</div>
+      <div class="mono" title="${v.sha256}">SHA-256 ${v.sha256.slice(0, 16)}…</div>
+      ${v.mentions ? `<div><span class="src in_cloud">Cloud</span> Heard: ${said || "nothing named"}</div>` :
+        `<div class="muted">Narration not heard on the phone yet.</div>`}
+      ${v.transcript ? `<details><summary>Transcript, word for word</summary><p>${esc(v.transcript)}</p></details>` : ""}
+    </div></div>`;
 }
 
 async function spot(sha: string) {
@@ -225,7 +315,10 @@ function render() {
         </select>
       </label>
       <label class="file primary">Add photos<input id="photos" type="file" accept="image/*" multiple></label>
+      <label class="file primary">Open a walk from the phone<input id="walkfiles" type="file" accept=".json,image/*,video/*" multiple></label>
     </div>
+    <p class="muted">For a phone walk, pick walk.json and every photo and video the phone shared, all at once.</p>
+    ${walkPanel()}
     <div class="photos">
       ${state.photos.map((p) => photoCard(p)).join("") || `<p class="muted">No photos yet. Each photo is hashed (SHA-256) when it is added and never changed.</p>`}
     </div>
@@ -264,7 +357,9 @@ function photoCard(p: Photo): string {
   return `<div class="photo">
     <img src="${p.url}" alt="${esc(p.name)}">
     <div class="pmeta">
-      <div><b>${esc(p.room)}</b> · ${esc(PROVENANCE_LABEL[p.provenance])}</div>
+      <div><b>${esc(p.room)}</b> · ${esc(PROVENANCE_LABEL[p.provenance])}${
+        p.atMs !== undefined && p.atMs !== null ? ` at ${clock(p.atMs)}` : ""}${
+        p.phoneSource ? ` · read <span class="src ${p.phoneSource}">${SOURCE_LABEL[p.phoneSource] ?? p.phoneSource}</span> on the phone` : ""}</div>
       <div class="mono" title="${p.sha256}">SHA-256 ${p.sha256.slice(0, 16)}…</div>
       <div class="muted">${p.recordedAt ? `Recorded ${p.recordedAt}, per the file's own metadata` : "No recorded date in the file"}</div>
       <ul class="items">${items.map((it) => `<li>
@@ -276,6 +371,7 @@ function photoCard(p: Photo): string {
           ${state.lines.map((l) => `<option value="${esc(l.line_id)}" ${l.line_id === it.lineId ? "selected" : ""}>
             ${esc(l.line_id)}: ${esc(l.description)}</option>`).join("")}
         </select></li>`).join("")}</ul>
+      ${p.setAside?.length ? `<div class="muted">Set aside on the phone (building or not property): ${p.setAside.map(esc).join(", ")}</div>` : ""}
       <button class="ghost small" data-respot="${p.sha256}">Look again</button>
     </div></div>`;
 }
@@ -350,6 +446,10 @@ function bind() {
     const room = $<HTMLInputElement>("#room").value.trim() || "Unknown room";
     const prov = $<HTMLSelectElement>("#prov").value as Provenance;
     if (files?.length) await addPhotos(files, room, prov);
+  };
+  $<HTMLInputElement>("#walkfiles").onchange = async (e) => {
+    const files = (e.target as HTMLInputElement).files;
+    if (files?.length) await addWalk(files);
   };
   document.querySelectorAll<HTMLSelectElement>("select[data-item]").forEach((s) => {
     s.onchange = () => {

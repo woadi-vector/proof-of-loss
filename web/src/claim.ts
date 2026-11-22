@@ -25,7 +25,7 @@ export interface Comp {
 
 // Where a piece of evidence came from. Shown on every record so the app never
 // claims more certainty than the evidence gives it.
-export type Provenance = "captured_in_app" | "from_glasses" | "uploaded";
+export type Provenance = "captured_in_app" | "frame_from_video" | "from_glasses" | "uploaded";
 
 export interface Photo {
   sha256: string;
@@ -34,6 +34,9 @@ export interface Photo {
   provenance: Provenance;
   recordedAt: string | null; // from the file's own metadata, never the file system
   url: string; // object URL for display
+  atMs?: number | null; // for a frame: where in the walk video it came from
+  phoneSource?: string | null; // for a shared walk: where the phone's model ran
+  setAside?: string[]; // named by the phone's model, set aside by code as building or not property
 }
 
 export interface SpottedItem {
