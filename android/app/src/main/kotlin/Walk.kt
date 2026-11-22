@@ -56,6 +56,7 @@ data class VideoRecord(
     val provenance: String = "captured_in_app",
     val recordedAt: String? = null, // the date inside the video's own metadata, if any
     val sourceName: String? = null, // the file name it arrived under, for tracing it back
+    val receivedAt: String? = null, // when this phone took it in (glasses videos)
 )
 
 data class Walk(
@@ -65,6 +66,8 @@ data class Walk(
     val device: String,
     val captures: List<Capture>,
     val videos: List<VideoRecord> = emptyList(),
+    val claimNumber: String = "",
+    val lossAddress: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("format", "pol-walk-1")
@@ -72,6 +75,8 @@ data class Walk(
         .put("label", label)
         .put("started_at", startedAt)
         .put("device", device)
+        .put("claim_number", claimNumber)
+        .put("loss_address", lossAddress)
         .put("photos", JSONArray().apply {
             captures.forEach { c ->
                 put(JSONObject()
@@ -106,6 +111,7 @@ data class Walk(
                     .put("hashed", if (v.provenance == "captured_in_app") "at_capture" else "on_receipt")
                     .put("recorded_at", v.recordedAt ?: JSONObject.NULL)
                     .put("source_name", v.sourceName ?: JSONObject.NULL)
+                    .put("received_at", v.receivedAt ?: JSONObject.NULL)
                     .put("listen_source", v.listenSource ?: JSONObject.NULL)
                     .put("listen_error", v.listenError ?: JSONObject.NULL)
                     .put("transcript", v.transcript ?: JSONObject.NULL)
@@ -158,10 +164,12 @@ data class Walk(
                     v.optStringOrNull("listen_source"), v.optStringOrNull("listen_error"),
                     v.optStringOrNull("transcript"),
                     v.optString("provenance", "captured_in_app").ifBlank { "captured_in_app" },
-                    v.optStringOrNull("recorded_at"), v.optStringOrNull("source_name"))
+                    v.optStringOrNull("recorded_at"), v.optStringOrNull("source_name"),
+                    v.optStringOrNull("received_at"))
             }
             return Walk(o.getString("walk_id"), o.optString("label"), o.optString("started_at"),
-                o.optString("device"), caps, videos)
+                o.optString("device"), caps, videos,
+                o.optString("claim_number"), o.optString("loss_address"))
         }
 
         private fun JSONObject.optStringOrNull(k: String): String? =

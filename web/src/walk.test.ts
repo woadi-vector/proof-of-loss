@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { cleanBrand, clock, readWalk, verifyWalk } from "./walk";
 
 const WALK = JSON.stringify({
-  format: "pol-walk-1", walk_id: "w1", label: "Office", started_at: "2026-11-21T19:50:00Z", device: "SM-F966U",
+  format: "pol-walk-1", walk_id: "w1", claim_number: "FL-2026-0417", loss_address: "12 Palm Ct", label: "Office", started_at: "2026-11-21T19:50:00Z", device: "SM-F966U",
   photos: [
     { file: "aaa.jpg", sha256: "AAA", room: "Office", captured_at: "t", recorded_at: null,
       provenance: "frame_from_video", from_video: "vvv", at_ms: 33000, source: "on_device",
@@ -21,6 +21,7 @@ describe("readWalk", () => {
   it("reads the phone's record and keeps provenance, said lines and set-asides", () => {
     const w = readWalk(WALK);
     expect(w.photos).toHaveLength(3);
+    expect([w.claim_number, w.loss_address]).toEqual(["FL-2026-0417", "12 Palm Ct"]);
     expect(w.photos[0]).toMatchObject({ sha256: "aaa", provenance: "frame_from_video", at_ms: 33000, source: "on_device" });
     expect(w.photos[0].items).toHaveLength(1); // the nameless item is dropped, not invented
     expect(w.photos[0].said[0].name).toBe("computer monitor");

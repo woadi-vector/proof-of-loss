@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Narration during a walk video: the adjuster names rooms and items aloud. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- To list the day's glasses videos saved by the Meta AI app. Read only. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <!-- Evidence never goes into device backups: a walk leaves the phone only
          when the adjuster shares it. -->

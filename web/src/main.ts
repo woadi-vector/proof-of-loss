@@ -167,7 +167,9 @@ function walkPanel(): string {
         return parts.length ? `${parts.join(", ")}; ${bad.length === 1 ? "it is" : "they are"} not used as evidence.` : "";
       })()}
     </div>
-    <p class="muted">Walk ${esc(w.label || w.walk_id)} · ${esc(w.device)} · started ${esc(w.started_at.slice(0, 16).replace("T", " "))} UTC ·
+    <p><b>${w.claim_number ? `Claim ${esc(w.claim_number)}` : "No claim number on this walk"}</b>${
+      w.loss_address ? ` · ${esc(w.loss_address)}` : ""}</p>
+    <p class="muted">Walk ${esc(w.walk_id.slice(0, 8))} · ${esc(w.device)} · started ${esc(w.started_at.slice(0, 16).replace("T", " "))} UTC ·
       the phone read ${onDevice} on device and ${inCloud} in the cloud.</p>
     ${bad.length ? `<ul class="bad">${bad.map((f) => `<li><span class="chip ${f.status === "changed" ? "err" : "warn"}">${
       f.status === "changed" ? "Does not match" : "Not received"}</span> ${esc(f.file)}${

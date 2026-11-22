@@ -324,13 +324,29 @@ fun WalkScreen(store: WalkStore) {
             if (walk.videos.none { it.sha256 == sha }) {
                 update(walk.copy(videos = listOf(VideoRecord(sha, file.name, room.trim(),
                     startedAt = recorded ?: Instant.now().toString(), durationMs = ms,
-                    provenance = "from_glasses", recordedAt = recorded, sourceName = name)) + walk.videos))
+                    provenance = "from_glasses", recordedAt = recorded, sourceName = name,
+                    receivedAt = Instant.now().toString())) + walk.videos))
             }
             pullNote = ""
         }
     }
     val pickGlassesVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) importGlassesVideo(uri)
+    }
+    // The day's videos, glasses first. Null while the list is closed.
+    var todays by remember { mutableStateOf<List<PhoneVideo>?>(null) }
+    fun loadTodays() {
+        scope.launch { todays = withContext(Dispatchers.IO) { runCatching { todaysVideos(ctx) }.getOrDefault(emptyList()) } }
+    }
+    val videoPermission = if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_VIDEO
+        else android.Manifest.permission.READ_EXTERNAL_STORAGE
+    val askVideoPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) loadTodays()
+        else pickGlassesVideo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+    }
+    fun openGlasses() {
+        if (ctx.checkSelfPermission(videoPermission) == android.content.pm.PackageManager.PERMISSION_GRANTED) loadTodays()
+        else askVideoPermission.launch(videoPermission)
     }
 
     if (cameraOpen) {
@@ -359,6 +375,12 @@ fun WalkScreen(store: WalkStore) {
         ctx.startActivity(Intent.createChooser(send, "Share walk"))
     }
 
+    val blocker = when {
+        walk.claimNumber.isBlank() -> "Enter the claim number first"
+        room.isBlank() -> "Choose a room first"
+        else -> null
+    }
+    val ready = blocker == null
     val onDevice = walk.captures.count { it.source == "on_device" }
     val inCloud = walk.captures.count { it.source == "in_cloud" }
 
@@ -372,6 +394,19 @@ fun WalkScreen(store: WalkStore) {
                 Text("Proof of Loss", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("Walk capture. Nothing leaves this phone until you share the walk.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Claim", fontWeight = FontWeight.SemiBold)
+                        OutlinedTextField(walk.claimNumber, { update(walk.copy(claimNumber = it)) },
+                            label = { Text("Claim number") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(walk.lossAddress, { update(walk.copy(lossAddress = it)) },
+                            label = { Text("Loss address") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Text("Every photo, frame and video in this walk is filed under this claim.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
             item {
                 Card(Modifier.fillMaxWidth()) {
@@ -409,18 +444,51 @@ fun WalkScreen(store: WalkStore) {
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { cameraOpen = true }, enabled = room.isNotBlank(), modifier = Modifier.weight(1f)) {
-                        Text(if (room.isBlank()) "Choose a room first" else "Open camera")
+                    Button(onClick = { cameraOpen = true }, enabled = ready, modifier = Modifier.weight(1f)) {
+                        Text(blocker ?: "Open camera")
                     }
                     OutlinedButton(onClick = { share() }, enabled = walk.captures.isNotEmpty() || walk.videos.isNotEmpty()) { Text("Share walk") }
                 }
             }
             item {
-                OutlinedButton(
-                    onClick = { pickGlassesVideo.launch(androidx.activity.result.PickVisualMediaRequest(
-                        ActivityResultContracts.PickVisualMedia.VideoOnly)) },
-                    enabled = room.isNotBlank(), modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (room.isBlank()) "Choose a room first" else "Add a walk recorded on Meta glasses") }
+                OutlinedButton(onClick = { openGlasses() }, enabled = ready, modifier = Modifier.fillMaxWidth()) {
+                    Text(blocker ?: "Add a walk recorded on Meta glasses")
+                }
+                Text("Add the video exactly as it came off the glasses. Never trim or edit it first: it is " +
+                    "evidence. The original also stays in the phone's gallery.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            todays?.let { list ->
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Videos from today", fontWeight = FontWeight.SemiBold)
+                            if (list.isEmpty()) Text("No videos taken today were found on this phone. If the Meta AI app has " +
+                                "not saved the walk to the gallery yet, do that first.", style = MaterialTheme.typography.bodySmall)
+                            val fmt = java.time.format.DateTimeFormatter.ofPattern("h:mm a").withZone(java.time.ZoneId.systemDefault())
+                            list.forEach { pv ->
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("${fmt.format(Instant.ofEpochMilli(pv.takenMs))} · " +
+                                            "${pv.durationMs / 60000}:${"%02d".format((pv.durationMs / 1000) % 60)}" +
+                                            if (pv.fromGlasses) " · Meta glasses" else "", style = MaterialTheme.typography.bodyMedium)
+                                        Text("${pv.folder} · ${pv.name}", style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Button(onClick = { todays = null; importGlassesVideo(pv.uri) }) { Text("Add") }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = {
+                                    todays = null
+                                    pickGlassesVideo.launch(androidx.activity.result.PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.VideoOnly))
+                                }) { Text("Choose from all videos") }
+                                TextButton(onClick = { todays = null }) { Text("Close") }
+                            }
+                        }
+                    }
+                }
             }
             items(walk.videos, key = { it.sha256 }) { v ->
                 Card(Modifier.fillMaxWidth()) {
@@ -434,6 +502,10 @@ fun WalkScreen(store: WalkStore) {
                         if (v.provenance == "from_glasses") Text(
                             "Hashed when this phone received it${v.sourceName?.let { " ($it)" } ?: ""}, not when the glasses recorded it.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        recordedGap(v)?.let { days -> Text(
+                            "Recorded $days ${if (days == 1L) "day" else "days"} before it was added to this walk. " +
+                                "Adjuster to confirm it belongs to this claim.",
+                            style = MaterialTheme.typography.bodySmall, color = WARN) }
                         Text("SHA-256 ${v.sha256.take(16)}…", fontFamily = FontFamily.Monospace, fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("Kept unchanged for review. Frames are copies; the video is never edited.",
@@ -655,3 +727,11 @@ fun RoomPicker(selected: String, used: List<String>, onPick: (String) -> Unit) {
 }
 
 private fun fmt(ms: Long) = "${ms / 60000}:${"%02d".format((ms / 1000) % 60)}"
+
+/** Whole days between a glasses video's recorded date and when it was added; null when under a day or unknown. */
+fun recordedGap(v: VideoRecord): Long? {
+    val rec = v.recordedAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return null
+    val got = v.receivedAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return null
+    val days = java.time.Duration.between(rec, got).toDays()
+    return days.takeIf { it >= 1 }
+}

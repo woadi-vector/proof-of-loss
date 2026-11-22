@@ -46,6 +46,8 @@ export interface WalkRecord {
   label: string;
   started_at: string;
   device: string;
+  claim_number: string;
+  loss_address: string;
   photos: WalkPhoto[];
   videos: WalkVideo[];
 }
@@ -101,7 +103,8 @@ export function readWalk(text: string): WalkRecord {
       purchase_year: numOrNull(m.purchase_year), quantity: numOrNull(m.quantity),
     })) : null,
   })).filter((v) => v.file && v.sha256);
-  return { walk_id: str(o.walk_id), label: str(o.label), started_at: str(o.started_at), device: str(o.device), photos, videos };
+  return { walk_id: str(o.walk_id), label: str(o.label), started_at: str(o.started_at), device: str(o.device),
+    claim_number: str(o.claim_number), loss_address: str(o.loss_address), photos, videos };
 }
 
 export type FileCheck = "matches" | "changed" | "missing";
