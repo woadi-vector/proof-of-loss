@@ -60,14 +60,17 @@ fun extractAudio(video: File, out: File): Boolean {
 }
 
 private const val LISTEN_PROMPT = """This is the audio from an insurance adjuster's walkthrough video of a home.
-List what the adjuster says, in order, with the time it is said (seconds from the start).
-- kind "room": the adjuster names the room they are entering or standing in ("kitchen", "primary bedroom").
-- kind "item": the adjuster names a belonging. Put the item in text ("65 inch television"),
+First, in transcript, write down every word you can hear, in order, with the time in seconds
+at the start of each sentence, like "[3] This is the office. [7] That's my ProForm bike."
+Write "(no speech)" if there is none and "(unclear)" for words you cannot make out.
+Then list, in mentions, what the adjuster names, in order, with the time it is said:
+- kind "room": a room they are entering or standing in ("kitchen", "primary bedroom").
+- kind "item": any belonging, object or piece of property they mention, even in passing
+  ("that's the TV", "my exercise bike", "the dresser came from my mom"). Put the item in text,
   any brand or model they say in brand_model, any purchase year they say in purchase_year,
   and any count they say in quantity.
 Use only what is actually said. Do not add items, brands, years or counts that are not spoken.
-Use "" for brand_model and 0 for purchase_year or quantity when not said.
-If nothing is said, return an empty list."""
+Use "" for brand_model and 0 for purchase_year or quantity when not said."""
 
 /**
  * Listening is done by cloud Gemini through Firebase AI Logic: the on-device model reads
@@ -80,6 +83,7 @@ class Listener {
             responseMimeType = "application/json"
             responseSchema = Schema.obj(
                 properties = mapOf(
+                    "transcript" to Schema.string(),
                     "mentions" to Schema.array(
                         items = Schema.obj(
                             properties = mapOf(
@@ -97,14 +101,25 @@ class Listener {
         },
     )
 
-    suspend fun listen(audio: File): List<Mention> {
+    suspend fun listen(audio: File): Heard {
         val bytes = audio.readBytes()
         val response = model.generateContent(content {
             inlineData(bytes, "audio/mp4")
             text(LISTEN_PROMPT)
         })
-        return parseMentions(response.text ?: "")
+        val text = response.text ?: ""
+        return Heard(parseTranscript(text), parseMentions(text))
     }
+}
+
+/** What the cloud heard: the words as transcribed, and the rooms and items named in them. */
+data class Heard(val transcript: String, val mentions: List<Mention>)
+
+/** The transcript as the model wrote it; if it wrote none, the start of its raw answer. */
+fun parseTranscript(text: String): String {
+    val t = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+    return runCatching { JSONObject(t.substring(t.indexOf('{'), t.lastIndexOf('}') + 1)).optString("transcript") }
+        .getOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: "(no transcript returned) " + t.take(300)
 }
 
 fun parseMentions(text: String): List<Mention> {

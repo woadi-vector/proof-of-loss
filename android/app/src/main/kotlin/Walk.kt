@@ -49,6 +49,7 @@ data class VideoRecord(
     val mentions: List<Mention>? = null, // what the adjuster said; null until the narration is heard
     val listenSource: String? = null,
     val listenError: String? = null,
+    val transcript: String? = null, // every word the cloud heard, as it wrote it down
 )
 
 data class Walk(
@@ -98,6 +99,7 @@ data class Walk(
                     .put("provenance", "captured_in_app")
                     .put("listen_source", v.listenSource ?: JSONObject.NULL)
                     .put("listen_error", v.listenError ?: JSONObject.NULL)
+                    .put("transcript", v.transcript ?: JSONObject.NULL)
                     .put("mentions", v.mentions?.let { ms -> JSONArray().apply { ms.forEach { m ->
                         put(JSONObject().put("at_ms", m.atMs).put("kind", m.kind).put("text", m.text)
                             .put("brand_model", m.brandModel).put("purchase_year", m.purchaseYear ?: JSONObject.NULL)
@@ -144,7 +146,8 @@ data class Walk(
                 } }
                 VideoRecord(v.getString("sha256"), v.getString("file"), v.optString("room"),
                     v.optString("started_at"), v.optLong("duration_ms"), ms,
-                    v.optStringOrNull("listen_source"), v.optStringOrNull("listen_error"))
+                    v.optStringOrNull("listen_source"), v.optStringOrNull("listen_error"),
+                    v.optStringOrNull("transcript"))
             }
             return Walk(o.getString("walk_id"), o.optString("label"), o.optString("started_at"),
                 o.optString("device"), caps, videos)
@@ -260,6 +263,7 @@ private val STRUCTURE = setOf(
     "vent", "air vent", "register", "outlet", "light switch", "switch", "baseboard", "trim", "molding",
     "closet door", "closet doors", "carpet", "hardwood floor", "tile", "drywall", "stairs", "railing",
     "ceiling fan", "smoke detector", "thermostat",
+    "door handle", "door knob", "doorknob", "door hardware", "hardware", "hinge", "hinges", "lock", "deadbolt",
 )
 
 fun isStructure(name: String): Boolean =

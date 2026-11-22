@@ -52,7 +52,7 @@ fun buildInventory(captures: List<Capture>): List<InventoryLine> {
     return groups.map { (key, list) ->
         // The most common full name stands for the line; the others stay visible as sightings.
         val name = list.groupingBy { it.first.name.lowercase() }.eachCount().maxByOrNull { it.value }!!.key
-        val brands = list.map { it.first.brandModel }.filter { it.isNotBlank() }
+        val brands = list.map { cleanBrand(it.first.brandModel) }.filter { it.isNotBlank() }
             .groupBy { normBrand(it) }.map { (_, v) -> v.first() to v.size }.sortedByDescending { it.second }.toMap()
         InventoryLine(
             room = list.first().second.room,

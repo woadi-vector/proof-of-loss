@@ -206,9 +206,11 @@ fun WalkScreen(store: WalkStore) {
                 val ok = withContext(Dispatchers.IO) { extractAudio(store.video(v), audio) }
                 if (!ok) throw IllegalStateException("this video has no audio track")
                 pullNote = "Listening in the cloud (needs signal)"
-                val mentions = listener.listen(audio)
+                val heard = listener.listen(audio)
+                val mentions = heard.mentions
                 update(walk.copy(videos = walk.videos.map {
-                    if (it.sha256 == v.sha256) it.copy(mentions = mentions, listenSource = "in_cloud", listenError = null) else it }))
+                    if (it.sha256 == v.sha256) it.copy(mentions = mentions, transcript = heard.transcript,
+                        listenSource = "in_cloud", listenError = null) else it }))
                 // Rooms follow what the adjuster said, frame by frame.
                 update(walk.copy(captures = walk.captures.map { c ->
                     if (c.fromVideo == v.sha256 && c.atMs != null) c.copy(room = roomAt(c.atMs, mentions, v.room)) else c }))
@@ -413,6 +415,10 @@ fun WalkScreen(store: WalkStore) {
                                             (if (m.brandModel.isNotBlank()) " (${m.brandModel})" else "") +
                                             (m.purchaseYear?.let { y -> ", bought $y" } ?: "") },
                                     style = MaterialTheme.typography.bodySmall)
+                            }
+                            v.transcript?.let { t ->
+                                Text("Heard, word for word: $t", style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
