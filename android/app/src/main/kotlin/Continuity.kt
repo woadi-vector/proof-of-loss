@@ -16,6 +16,9 @@ data class InventoryLine(
     val sightings: List<Sighting2>,
     val brandReadings: Map<String, Int>,
     val said: List<String> = emptyList(), // the adjuster's own words for this item, with brand or year
+    // Clothing seen only in frames that also show a TV or monitor may be what the screen is
+    // showing. Kept on the list and flagged; the adjuster decides.
+    val maybeOnScreen: Boolean = false,
 ) {
     val clearCount get() = sightings.count { it.clear }
     val bestSha get() = (sightings.firstOrNull { it.clear } ?: sightings.first()).captureSha
@@ -24,6 +27,15 @@ data class InventoryLine(
 /** Words that name the same kind of thing. Kept short on purpose: only plain equivalents. */
 private val SAME_THING = mapOf("tv" to "television", "tvs" to "television", "televisions" to "television",
     "couch" to "sofa", "couches" to "sofa", "fridge" to "refrigerator")
+
+private val CLOTHING = setOf("jacket", "jackets", "coat", "coats", "shirt", "shirts", "pants", "jeans", "shoe", "shoes",
+    "boot", "boots", "belt", "belts", "dress", "hat", "hats", "cap", "hoodie", "sweater", "skirt", "shorts", "socks",
+    "gloves", "clothing", "clothes")
+
+private fun isClothing(name: String) =
+    withoutBrackets(name).lowercase().replace(Regex("[^a-z ]"), " ").trim().split(Regex("\\s+")).lastOrNull() in CLOTHING ||
+        name.lowercase().startsWith("clothing")
+private val SCREENS = setOf("television", "monitor", "screen")
 
 private val GENERIC = setOf("box", "unit", "item", "thing", "object", "frame", "set", "piece", "equipment")
 
@@ -36,6 +48,8 @@ fun headWord(name: String): String {
         else if (it.length > 3 && it.endsWith("s")) it.dropLast(1) else it }
     // "exercise equipment frame" -> keep two words when the last one is too generic to stand alone.
     val last = singular.last()
+    // "television screen" is the television, not a separate screen.
+    if (last == "screen" && singular.dropLast(1).any { it == "television" || it == "monitor" }) return singular[singular.size - 2]
     return if (last in GENERIC && singular.size >= 2) singular.takeLast(2).joinToString(" ") else last
 }
 
@@ -70,6 +84,8 @@ fun buildInventory(captures: List<Capture>): List<InventoryLine> {
             sightings = list.map { (s, c) -> Sighting2(c.sha256, c.atMs, s.clear, s.brandModel) }.distinctBy { it.captureSha },
             brandReadings = brands,
             said = saidBy[key] ?: emptyList(),
+            maybeOnScreen = list.all { isClothing(it.first.name) } && saidBy[key].isNullOrEmpty() && list.all { (_, c) ->
+                c.items.any { headWord(it.name) in SCREENS } },
         )
     }.sortedWith(compareBy({ it.room }, { -it.sightings.size }))
 }

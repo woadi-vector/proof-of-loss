@@ -607,7 +607,8 @@ fun WalkScreen(store: WalkStore) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Room inventory", fontWeight = FontWeight.SemiBold)
-                        Text("${inventory.size} belongings from ${walk.captures.count { it.source != null }} photos and frames. " +
+                        val toConfirm = inventory.count { it.maybeOnScreen }
+                        Text("${inventory.size} belongings${if (toConfirm > 0) " ($toConfirm to confirm)" else ""} from ${walk.captures.count { it.source != null }} photos and frames. " +
                             "Repeats are rolled up, never dropped; each line keeps every sighting.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         inventory.groupBy { it.room }.forEach { (r, lines) ->
@@ -633,6 +634,8 @@ fun WalkScreen(store: WalkStore) {
                                     if (ln.clearCount < ln.sightings.size) append("; ${ln.clearCount} clear")
                                     append(")")
                                 }, style = MaterialTheme.typography.bodySmall)
+                                if (ln.maybeOnScreen) Text("   may be on the TV screen, not in the room; adjuster to confirm",
+                                    style = MaterialTheme.typography.labelSmall, color = WARN)
                                 if (ln.said.isNotEmpty()) Text("   said: " + ln.said.distinct().joinToString("; "),
                                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                                 // Named at more than one moment: maybe one item, maybe two. The adjuster decides.
@@ -745,10 +748,13 @@ fun CaptureCard(c: Capture, file: File, busy: Boolean, onCloud: () -> Unit = {},
                             fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         TextButton(onClick = onRetry) { Text("Look again") }
                     }
-                    else -> c.items.forEach { it2 ->
+                    // The model sometimes repeats one name in a frame; show it once with the count.
+                    else -> c.items.groupBy { listOf(it.name.lowercase(), it.brandModel, it.clear) }.values.forEach { same ->
+                        val it2 = same.first()
                         Text(
                             buildString {
                                 append("• ").append(it2.name)
+                                if (same.size > 1) append(" ×").append(same.size).append(" (named ").append(same.size).append(" times)")
                                 if (it2.brandModel.isNotBlank()) append(" (").append(it2.brandModel).append(")")
                                 if (!it2.clear) append("  [unclear frame]")
                             },
