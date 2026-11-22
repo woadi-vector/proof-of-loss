@@ -47,6 +47,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +79,14 @@ import java.io.File
 import java.time.Instant
 
 class CaptureActivity : ComponentActivity() {
+
+    companion object {
+        /** True while this app is the one on screen: the only time Gemini Nano will run. */
+        val onScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
+    }
+
+    override fun onResume() { super.onResume(); onScreen.value = true }
+    override fun onPause() { onScreen.value = false; super.onPause() }
 
     private lateinit var store: WalkStore
 
@@ -140,7 +149,16 @@ fun WalkScreen(store: WalkStore) {
         try {
             val bmp: Bitmap = withContext(Dispatchers.IO) { loadScaled(store.photo(c), 1024) }
                 ?: throw IllegalStateException("could not read the photo")
-            val r = (if (cloud) cloudSpotter else spotter).spot(bmp)
+            var r: SpotResult? = null
+            for (attempt in 0 until 3) {
+                try { r = (if (cloud) cloudSpotter else spotter).spot(bmp); break }
+                catch (e: Exception) {
+                    // AICore limits how fast one app may ask; wait and try again.
+                    if (attempt < 2 && "busy" in (e.message ?: "").lowercase()) kotlinx.coroutines.delay(2000L shl attempt)
+                    else throw e
+                }
+            }
+            r!!
             val (notProp, rest) = r.items.partition { isNotProperty(it.name) }
             val (structure, contents) = rest.partition { isStructure(it.name) }
             replace(sha) { it.copy(items = contents, source = r.source, modelMs = r.ms, modelError = null,
@@ -148,8 +166,12 @@ fun WalkScreen(store: WalkStore) {
                 notProperty = notProp.map { s -> s.name }) }
         } catch (e: Exception) {
             val msg = e.message ?: e.javaClass.simpleName
-            replace(sha) { it.copy(modelError = if ("policy" in msg.lowercase())
-                "the on-device model declined this frame (its safety filter). $msg" else msg) }
+            replace(sha) { it.copy(modelError = when {
+                !CaptureActivity.onScreen.value || "background" in msg.lowercase() ->
+                    "$PAUSED the app was not on screen, and Gemini Nano only runs while it is. Resumes when you return."
+                "policy" in msg.lowercase() -> "the on-device model declined this frame (its safety filter). $msg"
+                else -> msg
+            }) }
         } finally {
             working = working - sha
         }
@@ -162,9 +184,9 @@ fun WalkScreen(store: WalkStore) {
     var pulling by remember { mutableStateOf<String?>(null) } // video sha being processed
     var pullNote by remember { mutableStateOf("") }
 
-    fun pull(v: VideoRecord) {
+    suspend fun doPull(v: VideoRecord) {
         pulling = v.sha256
-        scope.launch {
+        run {
             try {
                 val frames = withContext(Dispatchers.IO) {
                     pullFrames(store.video(v), store.dir) { msg -> pullNote = msg }
@@ -197,9 +219,9 @@ fun WalkScreen(store: WalkStore) {
         }
     }
 
-    fun listen(v: VideoRecord) {
+    suspend fun doListen(v: VideoRecord) {
         pulling = v.sha256
-        scope.launch {
+        run {
             val audio = File(store.dir, "listen_${v.sha256.take(12)}.m4a")
             try {
                 pullNote = "Copying the narration out of the video"
@@ -259,6 +281,32 @@ fun WalkScreen(store: WalkStore) {
         }
     }
 
+    fun pull(v: VideoRecord) { scope.launch { doPull(v) } }
+    fun listen(v: VideoRecord) { scope.launch { doListen(v) } }
+
+    // Adding a video starts the whole walk processing at once: frames, Gemini Nano reads,
+    // then the narration in the cloud. Nobody has to remember to come back and tap.
+    fun processVideo(sha: String) {
+        scope.launch {
+            walk.videos.firstOrNull { it.sha256 == sha }?.let { doPull(it) }
+            walk.videos.firstOrNull { it.sha256 == sha }?.let { doListen(it) }
+        }
+    }
+
+    // Gemini Nano only runs while this app is on screen. Reads that were paused when the
+    // adjuster switched away pick up again on return, in order, with nothing to re-tap.
+    val onScreen by CaptureActivity.onScreen.collectAsState()
+    LaunchedEffect(onScreen) {
+        if (!onScreen || pulling != null) return@LaunchedEffect
+        val waiting = walk.captures.filter { it.source == null && it.sha256 !in working &&
+            (it.modelError == null || it.modelError.startsWith(PAUSED)) }
+        waiting.forEachIndexed { i, c ->
+            pullNote = "Picking up where it paused: frame ${i + 1} of ${waiting.size}"
+            spotOne(c.sha256)
+        }
+        if (waiting.isNotEmpty()) pullNote = "All frames read"
+    }
+
     LaunchedEffect(spotter) {
         val s = runCatching { spotter.status() }.getOrNull()
         canDownload = s == OnDeviceModelStatus.DOWNLOADABLE
@@ -297,6 +345,7 @@ fun WalkScreen(store: WalkStore) {
             val (sha, file) = withContext(Dispatchers.IO) { store.acceptVideo(pending) }
             if (walk.videos.none { it.sha256 == sha }) {
                 update(walk.copy(videos = listOf(VideoRecord(sha, file.name, room.trim(), startedAt, durationMs)) + walk.videos))
+                processVideo(sha)
             }
         }
     }
@@ -326,6 +375,7 @@ fun WalkScreen(store: WalkStore) {
                     startedAt = recorded ?: Instant.now().toString(), durationMs = ms,
                     provenance = "from_glasses", recordedAt = recorded, sourceName = name,
                     receivedAt = Instant.now().toString())) + walk.videos))
+                processVideo(sha)
             }
             pullNote = ""
         }
@@ -582,9 +632,42 @@ fun WalkScreen(store: WalkStore) {
                 CaptureCard(c, store.photo(c), c.sha256 in working, onCloud = { look(c.sha256, cloud = true) }) { look(c.sha256) }
             }
             item {
-                TextButton(onClick = {
-                    walk = store.start("", "${Build.MANUFACTURER} ${Build.MODEL}")
-                }) { Text("Start a new walk (this one is kept on the phone)") }
+                val unread = walk.captures.count { it.fromVideo != null && it.source == null &&
+                    (it.modelError == null || it.modelError.startsWith(PAUSED)) }
+                val unheard = walk.videos.filter { it.mentions == null }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Finish this walk", fontWeight = FontWeight.SemiBold)
+                        when {
+                            walk.videos.isEmpty() -> Text("Add this walk's video before starting another walk: record it " +
+                                "in the app, or add the one from the glasses now.", style = MaterialTheme.typography.bodySmall)
+                            pulling != null || walk.videos.any { v -> walk.captures.none { it.fromVideo == v.sha256 } } ->
+                                Text("Pulling and reading frames. Keep the app open; it pauses if you switch away and picks up when you return.",
+                                    style = MaterialTheme.typography.bodySmall)
+                            unread > 0 -> Text("$unread frames still to read on the phone. Keep the app open.",
+                                style = MaterialTheme.typography.bodySmall)
+                            unheard.isNotEmpty() -> {
+                                Text("Every frame is read. The narration still needs to be heard, which needs signal.",
+                                    style = MaterialTheme.typography.bodySmall)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = { unheard.forEach { listen(it) } }) { Text("Hear narration now") }
+                                    TextButton(onClick = {
+                                        update(walk.copy(videos = walk.videos.map { v -> if (v.mentions == null) v.copy(
+                                            listenError = "walk closed at ${Instant.now()} without the narration heard: no signal") else v }))
+                                        walk = store.start("", "${Build.MANUFACTURER} ${Build.MODEL}")
+                                    }) { Text("No signal: close without it") }
+                                }
+                            }
+                            else -> {
+                                Text("Video added, every frame read, narration heard. This walk is complete.",
+                                    style = MaterialTheme.typography.bodySmall)
+                                Button(onClick = { walk = store.start("", "${Build.MANUFACTURER} ${Build.MODEL}") }) {
+                                    Text("Start a new walk (this one is kept on the phone)")
+                                }
+                            }
+                        }
+                    }
+                }
                 Spacer(Modifier.height(24.dp))
             }
         }
@@ -735,3 +818,6 @@ fun recordedGap(v: VideoRecord): Long? {
     val days = java.time.Duration.between(rec, got).toDays()
     return days.takeIf { it >= 1 }
 }
+
+/** Marks a frame read that stopped because the app left the screen; it is retried on return. */
+const val PAUSED = "paused:"
