@@ -445,6 +445,9 @@ fun WalkScreen(store: WalkStore) {
                                 }, style = MaterialTheme.typography.bodySmall)
                                 if (ln.said.isNotEmpty()) Text("   said: " + ln.said.distinct().joinToString("; "),
                                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                // Named at more than one moment: maybe one item, maybe two. The adjuster decides.
+                                if (ln.said.distinct().size >= 2) Text("   named ${ln.said.distinct().size} times; adjuster to confirm whether this is one item or ${ln.said.distinct().size}",
+                                    style = MaterialTheme.typography.labelSmall, color = WARN)
                                 if (ln.brandReadings.isNotEmpty()) {
                                     // A brand read only once is never treated as the brand: small text blurs in video.
                                     val agreed = ln.brandReadings.entries.size == 1 && ln.brandReadings.values.first() >= 2

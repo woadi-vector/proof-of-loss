@@ -34,6 +34,8 @@ fun headWord(name: String): String {
     return if (last in GENERIC && singular.size >= 2) singular.takeLast(2).joinToString(" ") else last
 }
 
+private fun clock(ms: Long) = "%d:%02d".format(ms / 60000, (ms / 1000) % 60)
+
 private fun normBrand(b: String) = b.uppercase().replace(Regex("[^A-Z0-9]"), "")
 
 fun buildInventory(captures: List<Capture>): List<InventoryLine> {
@@ -44,7 +46,10 @@ fun buildInventory(captures: List<Capture>): List<InventoryLine> {
         c.items.forEach { it -> groups.getOrPut(Key(c.room.lowercase(), headWord(it.name))) { mutableListOf() } += it to c }
         c.said.forEach { s ->
             val k = Key(c.room.lowercase(), headWord(s.name))
-            saidBy.getOrPut(k) { mutableListOf() } += s.name + if (s.brandModel.isNotBlank()) " (${s.brandModel})" else ""
+            // Each mention keeps its moment, so two monitors named at 0:05 and 0:33 stay two mentions.
+            saidBy.getOrPut(k) { mutableListOf() } += s.name +
+                (if (s.brandModel.isNotBlank()) " (${s.brandModel})" else "") +
+                (c.atMs?.let { " at " + clock(it) } ?: "")
             // A named item the camera did not list still gets a line: the frame at that moment is its evidence.
             if (k !in groups) groups[k] = mutableListOf(Spotted(s.name, "", true) to c)
         }
