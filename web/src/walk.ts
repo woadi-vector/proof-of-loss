@@ -41,6 +41,18 @@ export interface WalkVideo {
   mentions: WalkMention[] | null;
 }
 
+/** One line of the phone's roll-up: the same item across frames, every sighting kept. */
+export interface WalkLine {
+  line_id: string;
+  room: string;
+  description: string;
+  brand_model_said: string; // the brand or model the adjuster said aloud, if any
+  brand_readings: Record<string, number>; // what the camera read, with counts; never settled by code
+  said: string[];
+  maybe_on_screen: boolean;
+  sightings: { sha256: string; at_ms: number | null; clear: boolean }[];
+}
+
 export interface WalkRecord {
   walk_id: string;
   label: string;
@@ -50,6 +62,7 @@ export interface WalkRecord {
   loss_address: string;
   photos: WalkPhoto[];
   videos: WalkVideo[];
+  inventory: WalkLine[];
 }
 
 /** "Unknown", "N/A", "none" and the like are no brand at all (same rule as the phone). */
@@ -104,7 +117,16 @@ export function readWalk(text: string): WalkRecord {
     })) : null,
   })).filter((v) => v.file && v.sha256);
   return { walk_id: str(o.walk_id), label: str(o.label), started_at: str(o.started_at), device: str(o.device),
-    claim_number: str(o.claim_number), loss_address: str(o.loss_address), photos, videos };
+    claim_number: str(o.claim_number), loss_address: str(o.loss_address), photos, videos,
+    inventory: arr(o.inventory).map((l) => ({
+      line_id: str(l.line_id), room: str(l.room), description: str(l.description),
+      brand_model_said: cleanBrand(str(l.brand_model_said)),
+      brand_readings: Object.fromEntries(Object.entries(l.brand_readings ?? {})
+        .filter(([, n]) => typeof n === "number").map(([k, n]) => [k, n as number])),
+      said: strs(l.said), maybe_on_screen: l.maybe_on_screen === true,
+      sightings: arr(l.sightings).map((x) => ({ sha256: str(x.sha256).toLowerCase(), at_ms: numOrNull(x.at_ms),
+        clear: x.clear !== false })).filter((x) => x.sha256),
+    })).filter((l) => l.line_id && l.description) };
 }
 
 export type FileCheck = "matches" | "changed" | "missing";

@@ -103,6 +103,18 @@ data class Walk(
                     }))
             }
         })
+        // The phone's roll-up, for the review page: derived from the photos above, never instead of them.
+        .put("inventory", JSONArray().apply {
+            buildInventory(captures).forEachIndexed { i, ln ->
+                put(JSONObject().put("line_id", "W${i + 1}").put("room", ln.room).put("description", ln.name)
+                    .put("brand_model_said", ln.saidBrandModel)
+                    .put("brand_readings", JSONObject(ln.brandReadings.mapValues { it.value }))
+                    .put("said", JSONArray(ln.said))
+                    .put("maybe_on_screen", ln.maybeOnScreen)
+                    .put("sightings", JSONArray().apply { ln.sightings.forEach { s ->
+                        put(JSONObject().put("sha256", s.captureSha).put("at_ms", s.atMs ?: JSONObject.NULL).put("clear", s.clear)) } }))
+            }
+        })
         .put("videos", JSONArray().apply {
             videos.forEach { v ->
                 put(JSONObject().put("file", v.file).put("sha256", v.sha256).put("room", v.room)

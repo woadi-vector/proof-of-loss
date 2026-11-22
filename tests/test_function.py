@@ -36,3 +36,14 @@ def test_bad_request_is_invalid_argument(main):
 def test_app_check_is_enforced():
     src = (ROOT / "functions" / "main.py").read_text()
     assert "enforce_app_check=True" in src
+
+
+def test_price_function_uses_the_injected_search_and_refuses_bad_input(main):
+    from firebase_functions import https_fn
+
+    answer = {"shopping_results": [{"title": "10-Outlet Power Strip", "source": "Walmart", "price": "$19.99",
+                                    "extracted_price": 19.99, "link": "https://walmart.example/strip"}]}
+    out = main.handle_price({"lines": [{"line_id": "1", "description": "power strip"}]}, lambda p: answer)
+    assert out["lines"][0]["replacement_cost"] == 19.99
+    with pytest.raises(https_fn.HttpsError):
+        main.handle_price({"lines": []}, lambda p: answer)

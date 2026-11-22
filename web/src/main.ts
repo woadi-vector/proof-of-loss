@@ -5,8 +5,10 @@ import {
   type Answer, type Comp, type Photo, type Provenance, type ScheduleLine, type SpottedItem,
 } from "./claim";
 import { secondLook, spotItems, type Mode } from "./ai";
-import { appCheckNote, checkClaim, type CheckResult, type LineResult, type Valuation } from "./firebase";
+import { appCheckNote, checkClaim, priceLines, type CheckResult, type LineResult, type Valuation } from "./firebase";
 import { sha256Hex } from "./hash";
+import * as XLSX from "xlsx";
+import { evidenceRows, inventoryRows, sourceRows, summaryRows, type PriceResponse, type PricedLine } from "./workbook";
 import { clock, readWalk, verifyWalk, type Verification, type WalkRecord, type WalkVideo } from "./walk";
 
 // ------------------------------------------------------------- state ----
@@ -29,6 +31,8 @@ const state = {
   walk: null as WalkRecord | null,
   verification: null as Verification | null,
   videoUrls: new Map<string, string>(),
+  prices: null as PriceResponse | null,
+  unpicked: new Set<string>(), // inventory lines the reviewer chose not to price
   busy: "",
   error: "",
 };
@@ -150,6 +154,73 @@ async function addWalk(files: FileList) {
   render();
 }
 
+// Replacement cost for the walk's inventory lines: one cloud search per line,
+// listings chosen and averaged by code, every listing cited.
+async function priceWalk() {
+  const w = state.walk;
+  if (!w) return;
+  const lines = w.inventory.filter((l) => !state.unpicked.has(l.line_id)).slice(0, 25);
+  state.busy = `Searching new-retail listings for ${lines.length} lines in the cloud`;
+  state.error = "";
+  render();
+  try {
+    const r = await timed(`Replacement cost for ${lines.length} lines`, async () => ({
+      ...(await priceLines({ currency: "USD", region: "US", lines: lines.map((l) => ({
+        line_id: l.line_id, description: l.description, brand_model: l.brand_model_said })) })).data,
+      source: "in_cloud" }));
+    state.prices = r;
+  } catch (e) {
+    state.error = `Pricing did not run: ${(e as Error).message}`;
+  }
+  state.busy = "";
+  render();
+}
+
+function downloadWorkbook() {
+  const w = state.walk, v = state.verification;
+  if (!w || !v) return;
+  const prices = new Map<string, PricedLine>((state.prices?.lines ?? []).map((p) => [p.line_id, p]));
+  const book = XLSX.utils.book_new();
+  const add = (name: string, rows: unknown[][]) => XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), name);
+  add("Summary", summaryRows(w, v, state.prices, w.inventory));
+  add("Inventory", inventoryRows(w, prices));
+  add("Sources", sourceRows(state.prices?.lines ?? []));
+  add("Evidence", evidenceRows(w, v));
+  XLSX.writeFile(book, `claim_${(w.claim_number || w.walk_id.slice(0, 8)).replace(/[^A-Za-z0-9_-]/g, "_")}_workbook.xlsx`);
+}
+
+function inventoryPanel(): string {
+  const w = state.walk;
+  if (!w?.inventory.length) return "";
+  const prices = new Map<string, PricedLine>((state.prices?.lines ?? []).map((p) => [p.line_id, p]));
+  const money2 = (n: number | null | undefined) => n == null ? "" : `$${n.toFixed(2)}`;
+  const picked = w.inventory.filter((l) => !state.unpicked.has(l.line_id)).length;
+  return `<div class="inv">
+    <h3>Inventory from the walk (${w.inventory.length} lines)</h3>
+    <p class="muted">Rolled up on the phone; every line keeps its sightings. Untick a line to leave it unpriced.</p>
+    <table class="invt"><thead><tr><th></th><th>Line</th><th>Item</th><th>Said</th><th>Seen</th><th>Replacement cost</th><th>Listings</th></tr></thead><tbody>
+    ${w.inventory.map((l) => { const p = prices.get(l.line_id); return `<tr class="${l.maybe_on_screen ? "confirm" : ""}">
+      <td><input type="checkbox" data-pick="${esc(l.line_id)}" ${state.unpicked.has(l.line_id) ? "" : "checked"}></td>
+      <td>${esc(l.line_id)}</td>
+      <td>${esc(l.description)}${l.maybe_on_screen ? ` <span class="chip warn">may be on the TV screen</span>` : ""}</td>
+      <td>${esc(l.brand_model_said)}</td><td class="num">${l.sightings.length}x</td>
+      <td class="num">${p ? (p.replacement_cost != null ? `<b>${money2(p.replacement_cost)}</b><div class="muted small">${esc(p.basis)}</div>` :
+        `<span class="muted">${esc(p.error ? "search failed" : "no listing kept")}</span>`) : ""}</td>
+      <td>${p ? `${p.kept.map((k) => `<a href="${esc(k.url)}" target="_blank" rel="noopener">${esc(k.source)} ${money2(k.price)}</a>`).join("<br>")}
+        ${p.set_aside.length ? `<details><summary>${p.set_aside.length} set aside</summary><ul>${p.set_aside.map((s) =>
+          `<li>${esc(s.source)} ${money2(s.price)}: ${esc(s.why)}</li>`).join("")}</ul></details>` : ""}
+        <div class="muted small">${esc(p.search_note)}</div>` : ""}</td></tr>`; }).join("")}
+    </tbody></table>
+    <div class="row">
+      <button id="price" class="primary" ${!picked || state.busy ? "disabled" : ""}>Find replacement cost (${Math.min(picked, 25)} searches)</button>
+      <button id="workbook" class="ghost">Download claim workbook (.xlsx)</button>
+      ${state.prices ? `<span class="pill">${state.prices.priced} priced · ${money2(state.prices.total_replacement_cost)} total, one of each</span>` : ""}
+    </div>
+    <p class="muted">Prices are averages of new items from established retailers, each listing linked. Refurbished, resale,
+      marketplace, accessory and different-model listings are set aside with the reason. No model writes a price.</p>
+  </div>`;
+}
+
 function walkPanel(): string {
   const w = state.walk, v = state.verification;
   if (!w || !v) return "";
@@ -176,6 +247,7 @@ function walkPanel(): string {
       f.status === "changed" ? ` <span class="mono muted">recorded ${f.recorded.slice(0, 12)}…, received ${f.actual!.slice(0, 12)}…</span>` : ""}</li>`).join("")}</ul>` : ""}
     ${v.extra.length ? `<p class="muted">Not named in walk.json, so not used: ${v.extra.map(esc).join(", ")}</p>` : ""}
     ${w.videos.map((vid) => videoCard(vid)).join("")}
+    ${inventoryPanel()}
   </div>`;
 }
 
@@ -461,6 +533,11 @@ function bind() {
     const prov = $<HTMLSelectElement>("#prov").value as Provenance;
     if (files?.length) await addPhotos(files, room, prov);
   };
+  document.querySelector<HTMLButtonElement>("#price")?.addEventListener("click", () => priceWalk());
+  document.querySelector<HTMLButtonElement>("#workbook")?.addEventListener("click", () => downloadWorkbook());
+  document.querySelectorAll<HTMLInputElement>("input[data-pick]").forEach((c) => {
+    c.onchange = () => { if (c.checked) state.unpicked.delete(c.dataset.pick!); else state.unpicked.add(c.dataset.pick!); render(); };
+  });
   $<HTMLInputElement>("#walkfiles").onchange = async (e) => {
     const files = (e.target as HTMLInputElement).files;
     if (files?.length) await addWalk(files);

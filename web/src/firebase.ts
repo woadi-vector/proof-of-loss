@@ -6,6 +6,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from "
 import { getAI, GoogleAIBackend } from "firebase/ai";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { firebaseConfig, FUNCTIONS_REGION } from "./config";
+import type { PriceResponse } from "./workbook";
 
 export const app = initializeApp(firebaseConfig);
 
@@ -35,6 +36,9 @@ export const ai = getAI(app, { backend: new GoogleAIBackend() });
 
 const functions = getFunctions(app, FUNCTIONS_REGION);
 export const checkClaim = httpsCallable<Record<string, unknown>, CheckResult>(functions, "check_claim");
+// One Google Shopping search per line, in the cloud; code chooses the listings and averages them.
+export const priceLines = httpsCallable<Record<string, unknown>, PriceResponse>(functions, "price_lines",
+  { timeout: 300_000 });
 
 export interface LineResult {
   status: string;

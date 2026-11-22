@@ -19,6 +19,7 @@ data class InventoryLine(
     // Clothing seen only in frames that also show a TV or monitor may be what the screen is
     // showing. Kept on the list and flagged; the adjuster decides.
     val maybeOnScreen: Boolean = false,
+    val saidBrandModel: String = "", // the brand or model the adjuster said for this item, if any
 ) {
     val clearCount get() = sightings.count { it.clear }
     val bestSha get() = (sightings.firstOrNull { it.clear } ?: sightings.first()).captureSha
@@ -61,10 +62,12 @@ fun buildInventory(captures: List<Capture>): List<InventoryLine> {
     data class Key(val room: String, val head: String)
     val groups = LinkedHashMap<Key, MutableList<Pair<Spotted, Capture>>>()
     val saidBy = LinkedHashMap<Key, MutableList<String>>()
+    val saidBrand = LinkedHashMap<Key, String>()
     captures.sortedWith(compareBy({ it.fromVideo == null }, { it.atMs ?: 0L })).forEach { c ->
         c.items.filterNot { isStructure(it.name) || isNotProperty(it.name) }.forEach { it -> groups.getOrPut(Key(c.room.lowercase(), headWord(it.name))) { mutableListOf() } += it to c }
         c.said.forEach { s ->
             val k = Key(c.room.lowercase(), headWord(s.name))
+            if (s.brandModel.isNotBlank() && k !in saidBrand) saidBrand[k] = s.brandModel.split(",").first().trim()
             // Each mention keeps its moment, so two monitors named at 0:05 and 0:33 stay two mentions.
             saidBy.getOrPut(k) { mutableListOf() } += s.name +
                 (if (s.brandModel.isNotBlank()) " (${s.brandModel})" else "") +
@@ -84,6 +87,7 @@ fun buildInventory(captures: List<Capture>): List<InventoryLine> {
             sightings = list.map { (s, c) -> Sighting2(c.sha256, c.atMs, s.clear, s.brandModel) }.distinctBy { it.captureSha },
             brandReadings = brands,
             said = saidBy[key] ?: emptyList(),
+            saidBrandModel = saidBrand[key] ?: "",
             maybeOnScreen = list.all { isClothing(it.first.name) } && saidBy[key].isNullOrEmpty() && list.all { (_, c) ->
                 c.items.any { headWord(it.name) in SCREENS } },
         )

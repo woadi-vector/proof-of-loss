@@ -15,6 +15,10 @@ predeploy step in firebase.json), so the deployed code is the tested code.
 from firebase_admin import initialize_app
 from firebase_functions import https_fn, options
 
+import os
+
+from pol.comps import serpapi_get
+from pol.price_service import PriceInputError, price_lines as run_pricing
 from pol.service import InputError, check_claim as run_check
 
 initialize_app()
@@ -32,3 +36,19 @@ def handle(data) -> dict:
                   memory=options.MemoryOption.MB_256, timeout_sec=60)
 def check_claim(req: https_fn.CallableRequest) -> dict:
     return handle(req.data)
+
+
+def handle_price(data, get_json=None) -> dict:
+    """Replacement cost from cited listings. `get_json` is injected in tests."""
+    try:
+        return run_pricing(data, get_json or serpapi_get(os.environ.get("SERPAPI_KEY", "")))
+    except PriceInputError as e:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, str(e))
+
+
+# The SerpApi key lives in Secret Manager (firebase functions:secrets:set SERPAPI_KEY),
+# never in the repo. One Google Shopping search per line.
+@https_fn.on_call(enforce_app_check=True, region="us-central1", secrets=["SERPAPI_KEY"],
+                  memory=options.MemoryOption.MB_256, timeout_sec=300)
+def price_lines(req: https_fn.CallableRequest) -> dict:
+    return handle_price(req.data)
