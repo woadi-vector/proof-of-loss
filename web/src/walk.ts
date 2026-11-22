@@ -47,6 +47,13 @@ export interface WalkRecord {
   videos: WalkVideo[];
 }
 
+/** "Unknown", "N/A", "none" and the like are no brand at all (same rule as the phone). */
+export function cleanBrand(b: string): string {
+  const t = b.trim();
+  const k = t.toLowerCase().replace(/[^a-z]/g, "");
+  return ["", "unknown", "na", "none", "unbranded", "generic", "notvisible", "unclear"].includes(k) ? "" : t;
+}
+
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
 const strOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -69,9 +76,9 @@ export function readWalk(text: string): WalkRecord {
     at_ms: numOrNull(p.at_ms),
     source: strOrNull(p.source),
     model_error: strOrNull(p.model_error),
-    items: arr(p.items).map((i) => ({ name: str(i.name), brand_model: str(i.brand_model), clear: i.clear !== false }))
+    items: arr(p.items).map((i) => ({ name: str(i.name), brand_model: cleanBrand(str(i.brand_model)), clear: i.clear !== false }))
       .filter((i) => i.name.trim() !== ""),
-    said: arr(p.said).map((s) => ({ name: str(s.name), brand_model: str(s.brand_model) })).filter((s) => s.name.trim() !== ""),
+    said: arr(p.said).map((s) => ({ name: str(s.name), brand_model: cleanBrand(str(s.brand_model)) })).filter((s) => s.name.trim() !== ""),
     set_aside_as_structure: strs(p.set_aside_as_structure),
     set_aside_not_property: strs(p.set_aside_not_property),
   })).filter((p) => p.file && p.sha256);

@@ -133,6 +133,7 @@ async function addWalk(files: FileList) {
       provenance: p.provenance === "frame_from_video" ? "frame_from_video" : "captured_in_app",
       recordedAt: p.recorded_at, url: URL.createObjectURL(file), atMs: p.at_ms, phoneSource: p.source,
       setAside: [...p.set_aside_as_structure, ...p.set_aside_not_property],
+      modelError: p.model_error,
     });
     state.files.set(p.sha256, file);
     const add = (name: string, brand: string, clear: boolean, source: string, n: string) => {
@@ -376,6 +377,7 @@ function photoCard(p: Photo): string {
           ${state.lines.map((l) => `<option value="${esc(l.line_id)}" ${l.line_id === it.lineId ? "selected" : ""}>
             ${esc(l.line_id)}: ${esc(l.description)}</option>`).join("")}
         </select></li>`).join("")}</ul>
+      ${p.modelError && !items.length ? `<div class="chip warn">Not read on the phone: ${esc(p.modelError)}</div>` : ""}
       ${p.setAside?.length ? `<div class="muted">Set aside on the phone (building or not property): ${p.setAside.map(esc).join(", ")}</div>` : ""}
       <button class="ghost small" data-respot="${p.sha256}">Look again</button>
     </div></div>`;

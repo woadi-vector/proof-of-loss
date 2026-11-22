@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clock, readWalk, verifyWalk } from "./walk";
+import { cleanBrand, clock, readWalk, verifyWalk } from "./walk";
 
 const WALK = JSON.stringify({
   format: "pol-walk-1", walk_id: "w1", label: "Office", started_at: "2026-11-21T19:50:00Z", device: "SM-F966U",
@@ -42,6 +42,14 @@ describe("verifyWalk", () => {
     expect(by).toEqual({ "aaa.jpg": "matches", "bbb.jpg": "changed", "ccc.jpg": "missing", "vvv.mp4": "matches" });
     expect(v.extra).toEqual(["stray.jpg"]);
     expect([v.matched, v.total]).toEqual([2, 4]);
+  });
+});
+
+describe("cleanBrand", () => {
+  it("drops non-brands and keeps real ones", () => {
+    expect(cleanBrand("Unknown")).toBe("");
+    expect(cleanBrand(" N/A ")).toBe("");
+    expect(cleanBrand("ProForm")).toBe("ProForm");
   });
 });
 

@@ -36,7 +36,8 @@ export interface Photo {
   url: string; // object URL for display
   atMs?: number | null; // for a frame: where in the walk video it came from
   phoneSource?: string | null; // for a shared walk: where the phone's model ran
-  setAside?: string[]; // named by the phone's model, set aside by code as building or not property
+  setAside?: string[];
+  modelError?: string | null; // the phone's model could not read this one, and why // named by the phone's model, set aside by code as building or not property
 }
 
 export interface SpottedItem {
