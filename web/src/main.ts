@@ -159,7 +159,12 @@ function walkPanel(): string {
   return `<div class="walk">
     <div class="vsum ${bad.length ? "warn" : "ok"}">
       <b>${v.matched} of ${v.total}</b> files match the SHA-256 the phone recorded at capture.
-      ${bad.length ? `${bad.length} ${bad.length === 1 ? "does" : "do"} not, and ${bad.length === 1 ? "is" : "are"} not used as evidence.` : ""}
+      ${(() => {
+        const changed = bad.filter((f) => f.status === "changed").length;
+        const missing = bad.length - changed;
+        const parts = [changed ? `${changed} changed since capture` : "", missing ? `${missing} not received` : ""].filter(Boolean);
+        return parts.length ? `${parts.join(", ")}; ${bad.length === 1 ? "it is" : "they are"} not used as evidence.` : "";
+      })()}
     </div>
     <p class="muted">Walk ${esc(w.label || w.walk_id)} · ${esc(w.device)} · started ${esc(w.started_at.slice(0, 16).replace("T", " "))} UTC ·
       the phone read ${onDevice} on device and ${inCloud} in the cloud.</p>
