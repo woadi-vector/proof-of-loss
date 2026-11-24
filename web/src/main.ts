@@ -205,7 +205,7 @@ function inventoryPanel(): string {
       <td>${esc(l.description)}${l.maybe_on_screen ? ` <span class="chip warn">may be on the TV screen</span>` : ""}</td>
       <td>${esc(l.brand_model_said)}</td><td class="num">${l.sightings.length}x</td>
       <td class="num">${p ? (p.replacement_cost != null ? `<b>${money2(p.replacement_cost)}</b><div class="muted small">${esc(p.basis)}</div>` :
-        `<span class="muted">${esc(p.error ? "search failed" : "no listing kept")}</span>`) : ""}</td>
+        `<span class="muted">${p.error ? `search failed<div class="small">${esc(p.error.slice(0, 160))}</div>` : "no listing kept"}</span>`) : ""}</td>
       <td>${p ? `${p.kept.map((k) => `<a href="${esc(k.url)}" target="_blank" rel="noopener">${esc(k.source)} ${money2(k.price)}</a>`).join("<br>")}
         ${p.set_aside.length ? `<details><summary>${p.set_aside.length} set aside</summary><ul>${p.set_aside.map((s) =>
           `<li>${esc(s.source)} ${money2(s.price)}: ${esc(s.why)}</li>`).join("")}</ul></details>` : ""}

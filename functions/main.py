@@ -41,7 +41,13 @@ def check_claim(req: https_fn.CallableRequest) -> dict:
 def handle_price(data, get_json=None) -> dict:
     """Replacement cost from cited listings. `get_json` is injected in tests."""
     try:
-        return run_pricing(data, get_json or serpapi_get(os.environ.get("SERPAPI_KEY", "")))
+        if get_json is None:
+            key = os.environ.get("SERPAPI_KEY", "").strip()  # a pasted secret can carry a stray newline
+            if not key:
+                raise https_fn.HttpsError(https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                                          "SERPAPI_KEY is not set for this function")
+            get_json = serpapi_get(key)
+        return run_pricing(data, get_json)
     except PriceInputError as e:
         raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, str(e))
 
