@@ -32,7 +32,7 @@ def handle(data) -> dict:
         raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, str(e))
 
 
-@https_fn.on_call(enforce_app_check=True, region="us-central1",
+@https_fn.on_call(enforce_app_check=True, invoker="public", region="us-central1",
                   memory=options.MemoryOption.MB_256, timeout_sec=60)
 def check_claim(req: https_fn.CallableRequest) -> dict:
     return handle(req.data)
@@ -46,9 +46,14 @@ def handle_price(data, get_json=None) -> dict:
         raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT, str(e))
 
 
+# invoker="public": callable functions must accept the browser's request at the network
+# level; App Check (enforced above) is what refuses calls that do not come from the
+# registered site or phone. Set here, never edited in the Cloud Run console, because a
+# console edit makes a new revision that needs a container image the cleanup policy may
+# already have deleted.
 # The SerpApi key lives in Secret Manager (firebase functions:secrets:set SERPAPI_KEY),
 # never in the repo. One Google Shopping search per line.
-@https_fn.on_call(enforce_app_check=True, region="us-central1", secrets=["SERPAPI_KEY"],
+@https_fn.on_call(enforce_app_check=True, invoker="public", region="us-central1", secrets=["SERPAPI_KEY"],
                   memory=options.MemoryOption.MB_256, timeout_sec=300)
 def price_lines(req: https_fn.CallableRequest) -> dict:
     return handle_price(req.data)
