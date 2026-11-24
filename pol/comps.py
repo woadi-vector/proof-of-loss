@@ -283,6 +283,10 @@ def _trusted(source: str, stores: list[str]) -> bool:
     s = source.lower().strip()
     if any(m in s for m in MARKETPLACE):
         return False
+    # Google Shopping names a third-party seller on a retailer's marketplace as
+    # "Walmart - SellerName": the retailer is not the seller, so it is not trusted.
+    if " - " in s:
+        return False
     return any(re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", s) for t in stores)
 
 

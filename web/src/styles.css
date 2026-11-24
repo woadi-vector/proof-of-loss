@@ -174,3 +174,4 @@ th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .invt tr.confirm td { background: var(--warn-bg); }
 .invt details ul { margin: 4px 0 0; padding-left: 16px; }
 .small { font-size: 11px; }
+.flag { color: var(--warn); }

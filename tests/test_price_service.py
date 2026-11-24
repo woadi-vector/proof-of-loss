@@ -72,3 +72,27 @@ def test_rejects_bad_input():
         price_lines({"lines": [{"line_id": "1"}]}, fake_get)
     with pytest.raises(PriceInputError):
         price_lines({"lines": [{"line_id": "1", "description": "tv"}], "currency": "EUR"}, fake_get)
+
+
+def test_marketplace_sellers_on_a_retailer_are_set_aside():
+    answer = {"shopping_results": [
+        {"title": "Storage Cabinet", "source": "Walmart - MMYGU", "price": "$303.94", "extracted_price": 303.94,
+         "link": "https://w/1"},
+        {"title": "Storage Cabinet", "source": "Walmart", "price": "$149.00", "extracted_price": 149.0, "link": "https://w/2"},
+        {"title": "Storage Cabinet", "source": "B&H Photo-Video-Audio", "price": "$155.00", "extracted_price": 155.0,
+         "link": "https://bh/3"},
+    ]}
+    r = price_lines({"lines": [{"line_id": "1", "description": "storage cabinet"}]}, lambda p: answer)
+    line = r["lines"][0]
+    assert [k["source"] for k in line["kept"]] == ["Walmart", "B&H Photo-Video-Audio"]
+    assert "trusted list" in line["set_aside"][0]["why"]
+
+
+def test_a_wide_spread_of_listings_is_flagged():
+    answer = {"shopping_results": [
+        {"title": "Wooden Table", "source": "West Elm", "price": "$479.20", "extracted_price": 479.2, "link": "https://a"},
+        {"title": "Wooden Table", "source": "Pottery Barn", "price": "$1,198.99", "extracted_price": 1198.99, "link": "https://b"},
+        {"title": "Wooden Table", "source": "Macy's", "price": "$1,079.00", "extracted_price": 1079.0, "link": "https://c"},
+    ]}
+    r = price_lines({"lines": [{"line_id": "1", "description": "wooden table"}]}, lambda p: answer)
+    assert any(f.startswith("wide spread") for f in r["lines"][0]["flags"])

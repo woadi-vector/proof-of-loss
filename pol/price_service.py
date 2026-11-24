@@ -22,6 +22,7 @@ from typing import Any, Callable
 from .comps import find_shopping
 from .pricing import price_from_comps
 
+WIDE_SPREAD = 2.5  # highest kept listing over lowest; past this the line is flagged
 MAX_LINES = 25  # one search per line; a cap keeps one call from spending a month's quota
 
 
@@ -79,6 +80,11 @@ def price_lines(payload: dict, get_json: Callable[[dict], dict], today: date | N
             out.append(entry)
             continue
         pr = price_from_comps(res.kept, currency, region)
+        prices = [c.price for c in pr.sources]
+        if len(prices) >= 2 and min(prices) > 0 and max(prices) / min(prices) > WIDE_SPREAD:
+            # Listings this far apart are not the same kind of thing: a number would hide that.
+            pr.flags.append(f"wide spread: the highest listing is {max(prices) / min(prices):.1f}x the lowest; "
+                            "describe the item (brand, size, material) to price like kind and quality")
         entry.update(
             replacement_cost=pr.replacement_cost,
             currency=pr.currency or currency,
