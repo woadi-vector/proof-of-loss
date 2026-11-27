@@ -107,6 +107,9 @@ def price_lines(payload: dict, get_json: Callable[[dict], dict], today: date | N
                     res = again
                     loose_flag = (f"no listing title names the model {bm}; counted listings match "
                                   f"{' and '.join(loose)} only; confirm the model before relying on this price")
+                else:
+                    loose_flag = (f"no listing title names the model {bm}, and none matched "
+                                  f"{' and '.join(loose)} either; no price")
         pr = price_from_comps(res.kept, currency, region)
         if loose_flag:
             pr.flags.append(loose_flag)
