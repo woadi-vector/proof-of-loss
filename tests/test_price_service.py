@@ -119,3 +119,14 @@ def test_titles_without_the_model_fall_back_to_brand_and_size_with_a_flag():
     why = {s["title"]: s["why"] for s in tv["set_aside"]}
     assert "lacks: tcl" in why["Hisense 75\" A6 Series 4K TV"]
     assert "lacks: 75" in why["TCL 65\" Class S4 4K TV"]
+
+
+def test_fallback_that_keeps_nothing_says_so():
+    answer = {"shopping_results": [
+        {"title": "Hisense 65\" A6 Series 4K TV", "source": "Best Buy", "price": "$399.99",
+         "extracted_price": 399.99, "link": "https://bestbuy.example/hisense"}]}
+    r = price_lines({"lines": [{"line_id": "W1", "description": "television", "brand_model": "TCL 75S451"}]},
+                    lambda p: answer, today=date(2026, 11, 27))
+    tv = r["lines"][0]
+    assert tv["replacement_cost"] is None
+    assert any("none matched tcl and 75 either" in f for f in tv["flags"])
