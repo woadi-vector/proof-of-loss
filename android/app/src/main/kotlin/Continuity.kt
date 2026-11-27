@@ -38,11 +38,13 @@ private fun isClothing(name: String) =
         name.lowercase().startsWith("clothing")
 private val SCREENS = setOf("television", "monitor", "screen")
 
-private val GENERIC = setOf("box", "unit", "item", "thing", "object", "frame", "set", "piece", "equipment")
+// "bar" alone cannot say what the item is: a sound bar and a pull-up bar are different belongings.
+private val GENERIC = setOf("box", "unit", "item", "thing", "object", "frame", "set", "piece", "equipment", "bar")
 
 /** The word a name is about: the last meaningful word, singular ("storage boxes" -> "box"). */
 fun headWord(name: String): String {
-    val words = withoutBrackets(name).lowercase().replace(Regex("[^a-z ]"), " ").trim().split(Regex("\\s+"))
+    val words = withoutBrackets(name).lowercase().replace("soundbar", "sound bar")
+        .replace(Regex("[^a-z ]"), " ").trim().split(Regex("\\s+"))
         .filter { it.length > 1 }.map { SAME_THING[it] ?: it }
     if (words.isEmpty()) return name.lowercase()
     val singular = words.map { if (it.length > 3 && it.endsWith("es") && !it.endsWith("ses")) it.dropLast(2)
