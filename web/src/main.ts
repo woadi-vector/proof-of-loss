@@ -197,7 +197,8 @@ function inventoryPanel(): string {
   const picked = w.inventory.filter((l) => !state.unpicked.has(l.line_id)).length;
   return `<div class="inv">
     <h3>Inventory from the walk (${w.inventory.length} lines)</h3>
-    <p class="muted">Rolled up on the phone; every line keeps its sightings. Untick a line to leave it unpriced.</p>
+    <p class="muted">Rolled up on the phone; every line keeps its sightings. Untick a line to leave it unpriced.
+      <button id="pick-said" class="ghost">Tick only lines with a brand or model said</button></p>
     <table class="invt"><thead><tr><th></th><th>Line</th><th>Item</th><th>Said</th><th>Seen</th><th>Replacement cost</th><th>Listings</th></tr></thead><tbody>
     ${w.inventory.map((l) => { const p = prices.get(l.line_id); return `<tr class="${l.maybe_on_screen ? "confirm" : ""}">
       <td><input type="checkbox" data-pick="${esc(l.line_id)}" ${state.unpicked.has(l.line_id) ? "" : "checked"}></td>
@@ -536,6 +537,10 @@ function bind() {
   };
   document.querySelector<HTMLButtonElement>("#price")?.addEventListener("click", () => priceWalk());
   document.querySelector<HTMLButtonElement>("#workbook")?.addEventListener("click", () => downloadWorkbook());
+  document.querySelector<HTMLButtonElement>("#pick-said")?.addEventListener("click", () => {
+    state.unpicked = new Set((state.walk?.inventory ?? []).filter((l) => !l.brand_model_said).map((l) => l.line_id));
+    render();
+  });
   document.querySelectorAll<HTMLInputElement>("input[data-pick]").forEach((c) => {
     c.onchange = () => { if (c.checked) state.unpicked.delete(c.dataset.pick!); else state.unpicked.add(c.dataset.pick!); render(); };
   });
