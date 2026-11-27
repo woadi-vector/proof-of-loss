@@ -1,5 +1,7 @@
 # Proof of Loss: working notes for Claude Code
 
+**Current entry (Nov 20 to 30, 2026): #BuildHybridAI (Firebase AI Logic).** README.md describes it: the Android app in `android/` (Gemini Nano on device through Firebase AI Logic hybrid inference, cloud Gemini for narration), the review page in `web/` (hosted at proof-of-loss.web.app), and the `check_claim` and `price_lines` Cloud Functions in `functions/`. The sections below about the Meta Global AI Developer Hackathon are history.
+
 Read this first. It carries the decisions made before this repo had a Claude Code session.
 
 ## What this is
@@ -32,7 +34,7 @@ New modules (offline, no model calls yet):
 
 `walk.py` and `providers.py` are Proof of Loss only; Clarice captures per checklist step instead, so they are not mirrored into Clarice's `contents-service/`. Everything else above is mirrored (Clarice PR #47 carries `lkq.py`).
 
-Tests: `python -m pytest -q` (new modules, includes a synthetic video built with ffmpeg) and `python tests/test_pipeline.py` (merge and schedule). Next: first live comps run on the Alex claim (confirm cost against the billing page), then the first live walk. Model calls will go through Google (Vertex AI preferred for carrier pilots), behind one interface so Azure or AWS can replace it.
+Tests: `python -m pytest -q` (new modules, includes a synthetic video built with ffmpeg) and `python tests/test_pipeline.py` (merge and schedule). Next: first live comps run on a client claim (confirm cost against the billing page), then the first live walk. Model calls will go through Google (Vertex AI preferred for carrier pilots), behind one interface so Azure or AWS can replace it.
 
 ## Deadlines and rules (times Central)
 
