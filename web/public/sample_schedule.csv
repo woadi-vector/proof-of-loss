@@ -1,0 +1,9 @@
+line,room,item,brand,model,qty,purchase_year,claimed_unit
+1,Living room,65 inch television,Samsung,QN65,1,2022,1800
+2,Living room,Soundbar,Sonos,Arc,1,2023,899
+3,Living room,Leather recliner,,,2,2019,1250
+4,Living room,Floor lamp,,,1,2020,180
+5,Kitchen,Stand mixer,KitchenAid,Artisan,1,2018,450
+6,Kitchen,Espresso machine,Breville,Barista Express,1,2021,700
+7,Bedroom,Dresser,,,1,2015,900
+8,Bedroom,Laptop,Apple,MacBook Pro,1,2023,2499

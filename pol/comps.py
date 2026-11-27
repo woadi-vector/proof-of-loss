@@ -80,6 +80,7 @@ class FindResult:
     queries: list[str]
     snapshots: list[dict] = field(default_factory=list)
     cited_pages: list[str] = field(default_factory=list)   # where the search went, after redirects
+    answer_sha256: str = ""  # SHA-256 of the raw search answer, the backup for every kept listing
 
 
 def norm_url(u: str) -> str:
@@ -255,16 +256,36 @@ TRUSTED_STORES_CA = [
     "kate spade", "ted baker", "timberland", "pajar", "cougar", "golf town", "bed bath & beyond",
     "hudson's bay", "the bay", "nordstrom", "saks", "brandsmart", "best buy",
 ]
+# The same rule for the United States: the maker's own store and established US
+# retailers. Amazon counts only as "Amazon.com" itself (third-party sellers show
+# under their own names and are set aside).
+TRUSTED_STORES_US = [
+    "best buy", "bestbuy.com", "walmart", "walmart.com", "target", "the home depot", "home depot",
+    "lowe's", "lowes", "costco", "sam's club", "amazon.com", "b&h photo", "b&h photo-video-audio",
+    "adorama", "crutchfield", "newegg", "staples", "office depot", "ikea", "wayfair", "crate & barrel",
+    "pottery barn", "west elm", "ashley", "rooms to go", "la-z-boy", "macy's", "kohl's", "nordstrom",
+    "jcpenney", "dick's sporting goods", "academy sports", "rei", "bed bath & beyond", "overstock",
+    "apple", "samsung", "lg", "sony", "tcl", "hisense", "vizio", "dell", "hp", "lenovo", "bose",
+    "sonos", "dyson", "kitchenaid", "whirlpool", "ge appliances", "proform", "ifit", "peloton",
+    "nordictrack", "bowflex", "dewalt", "milwaukee", "ryobi", "harbor freight", "ace hardware",
+    "menards", "tractor supply", "petsmart", "petco", "gamestop", "microsoft",
+]
 NOT_NEW = ("refurb", "remis à neuf", "remis a neuf", "re-certified", "recertified", "open box",
            "pre-owned", "preowned", "used", "déstockage", "destockage", "reconditionn", "renewed")
 PARTS = ("attachment", "accessor", "replacement", "brush tool", "brush head", "filter", "spare",
-         "parts", "strap only", "dust bag", "charger", "battery", "case for", "cover for")
+         "parts", "strap only", "dust bag", "charger", "battery", "case for", "cover for",
+         "wall mount", "mount for", "stand for", "remote for", "replacement remote", "screen protector",
+         "cable for", "power cord for")
 MARKETPLACE = ("market", "marketplace", "ebay", "poshmark", "etsy", "aliexpress", "temu", "desertcart")
 
 
 def _trusted(source: str, stores: list[str]) -> bool:
     s = source.lower().strip()
     if any(m in s for m in MARKETPLACE):
+        return False
+    # Google Shopping names a third-party seller on a retailer's marketplace as
+    # "Walmart - SellerName": the retailer is not the seller, so it is not trusted.
+    if " - " in s:
         return False
     return any(re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", s) for t in stores)
 
@@ -277,7 +298,7 @@ def select_shopping(data: dict, line_id: str, item: str, currency: str = "CAD", 
     trusted store whose title has every required word, priced as shown. Every
     other result is set aside with its reason, never edited."""
     today = today or date.today()
-    stores = [x.lower() for x in (stores or TRUSTED_STORES_CA)]
+    stores = [x.lower() for x in (stores or (TRUSTED_STORES_US if region.upper() == "US" else TRUSTED_STORES_CA))]
     must = [w.lower() for w in (must or []) if w.strip()]
     exclude = [w.lower() for w in (exclude or []) if w.strip()]
     res = FindResult(line_id, item, [], [], search_note, [item])
@@ -337,6 +358,7 @@ def find_shopping(line_id: str, item: str, get_json: Callable[[dict], dict], cur
                           exclude)
     raw = json.dumps(data, sort_keys=True).encode("utf-8")
     sha = hashlib.sha256(raw).hexdigest()
+    res.answer_sha256 = sha
     if snapshot_dir is not None:
         snapshot_dir.mkdir(parents=True, exist_ok=True)
         name = f"line{line_id}_shopping_{sha[:10]}.json"

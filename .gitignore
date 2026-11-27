@@ -9,3 +9,9 @@ out/
 
 # Real client claim files. Never committed; this repo is public.
 claims/
+
+# Firebase
+functions/pol/
+functions/venv/
+.firebase/
+.firebaserc.local
