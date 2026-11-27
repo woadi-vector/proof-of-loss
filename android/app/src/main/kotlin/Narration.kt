@@ -60,8 +60,9 @@ fun extractAudio(video: File, out: File): Boolean {
 }
 
 private const val LISTEN_PROMPT = """This is the audio from an insurance adjuster's walkthrough video of a home.
-First, in transcript, write down every word you can hear, in order, with the time in seconds
-at the start of each sentence, like "[3] This is the office. [7] That's my ProForm bike."
+First, in transcript, write down every word you can hear, in order, with the time at the start
+of each sentence as a plain count of seconds from the start, like "[3] This is the office.
+[66] That's my ProForm bike." (66 is one minute six seconds; never write it as 106.)
 Write "(no speech)" if there is none and "(unclear)" for words you cannot make out.
 Then list, in mentions, what the adjuster names, in order, with the time it is said:
 - kind "room": a room they are entering or standing in ("kitchen", "primary bedroom").
@@ -101,14 +102,14 @@ class Listener {
         },
     )
 
-    suspend fun listen(audio: File): Heard {
+    suspend fun listen(audio: File, durationMs: Long): Heard {
         val bytes = audio.readBytes()
         val response = model.generateContent(content {
             inlineData(bytes, "audio/mp4")
             text(LISTEN_PROMPT)
         })
         val text = response.text ?: ""
-        return Heard(parseTranscript(text), parseMentions(text))
+        return Heard(parseTranscript(text), parseMentions(text, durationMs))
     }
 }
 
@@ -122,17 +123,37 @@ fun parseTranscript(text: String): String {
         .getOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: "(no transcript returned) " + t.take(300)
 }
 
-fun parseMentions(text: String): List<Mention> {
+/**
+ * Models sometimes write 1:06 as 106. If any time runs past the end of the video and every such
+ * time reads as minutes and seconds that fit inside it, the answer used that style, so every
+ * time of 100 or more is read that way. Otherwise the times are left as written.
+ */
+fun fixClock(times: List<Double>, durationMs: Long): List<Double> {
+    if (durationMs <= 0) return times
+    fun asClock(t: Double): Double? {
+        val whole = t.toLong()
+        val s = whole % 100
+        val c = (whole / 100) * 60 + s + (t - whole)
+        return if (whole >= 100 && s < 60 && c * 1000 <= durationMs) c else null
+    }
+    val past = times.filter { it * 1000 > durationMs }
+    if (past.isEmpty() || past.any { asClock(it) == null }) return times
+    return times.map { asClock(it) ?: it }
+}
+
+fun parseMentions(text: String, durationMs: Long = 0): List<Mention> {
     val t = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
     val arr = runCatching { JSONObject(t.substring(t.indexOf('{'), t.lastIndexOf('}') + 1)).optJSONArray("mentions") }
         .getOrNull() ?: return emptyList()
-    return (0 until arr.length()).mapNotNull { i ->
-        val o = arr.optJSONObject(i) ?: return@mapNotNull null
+    val objs = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+    val times = fixClock(objs.map { it.optDouble("t", 0.0) }, durationMs)
+    return objs.indices.mapNotNull { i ->
+        val o = objs[i]
         val said = o.optString("text").trim()
         val kind = o.optString("kind").lowercase().let { if (it == "room") "room" else "item" }
         if (said.isEmpty()) null
         else Mention(
-            atMs = (o.optDouble("t", 0.0) * 1000).toLong().coerceAtLeast(0),
+            atMs = (times[i] * 1000).toLong().coerceAtLeast(0),
             kind = kind,
             text = said,
             brandModel = o.optString("brand_model").trim(),

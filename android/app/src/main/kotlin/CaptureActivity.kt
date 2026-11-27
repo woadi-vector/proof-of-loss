@@ -230,7 +230,7 @@ fun WalkScreen(store: WalkStore) {
                 val ok = withContext(Dispatchers.IO) { extractAudio(store.video(v), audio) }
                 if (!ok) throw IllegalStateException("this video has no audio track")
                 pullNote = "Listening in the cloud (needs signal)"
-                val heard = listener.listen(audio)
+                val heard = listener.listen(audio, v.durationMs)
                 val mentions = heard.mentions
                 update(walk.copy(videos = walk.videos.map {
                     if (it.sha256 == v.sha256) it.copy(mentions = mentions, transcript = heard.transcript,
