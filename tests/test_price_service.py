@@ -96,3 +96,26 @@ def test_a_wide_spread_of_listings_is_flagged():
     ]}
     r = price_lines({"lines": [{"line_id": "1", "description": "wooden table"}]}, lambda p: answer)
     assert any(f.startswith("wide spread") for f in r["lines"][0]["flags"])
+
+
+def test_titles_without_the_model_fall_back_to_brand_and_size_with_a_flag():
+    answer = {"shopping_results": [
+        {"title": "TCL - 75\" Class S4 Series 4K UHD HDR LED Smart TV with Google TV", "source": "Best Buy",
+         "price": "$579.99", "extracted_price": 579.99, "link": "https://bestbuy.example/s4"},
+        {"title": "TCL 75-Inch Class S4 4K Smart Google TV", "source": "Walmart", "price": "$548.00",
+         "extracted_price": 548.0, "link": "https://walmart.example/s4"},
+        {"title": "Hisense 75\" A6 Series 4K TV", "source": "Best Buy", "price": "$499.99",
+         "extracted_price": 499.99, "link": "https://bestbuy.example/hisense"},
+        {"title": "TCL 65\" Class S4 4K TV", "source": "Target", "price": "$399.99",
+         "extracted_price": 399.99, "link": "https://target.example/65"},
+    ]}
+    calls = []
+    r = price_lines({"lines": [{"line_id": "W1", "description": "television", "brand_model": "TCL 75S451"}]},
+                    lambda p: calls.append(p) or answer, today=date(2026, 11, 27))
+    tv = r["lines"][0]
+    assert len(calls) == 1                                   # chosen again from the same answer
+    assert sorted(k["source"] for k in tv["kept"]) == ["Best Buy", "Walmart"]
+    assert any("no listing title names the model TCL 75S451" in f for f in tv["flags"])
+    why = {s["title"]: s["why"] for s in tv["set_aside"]}
+    assert "lacks: tcl" in why["Hisense 75\" A6 Series 4K TV"]
+    assert "lacks: 75" in why["TCL 65\" Class S4 4K TV"]

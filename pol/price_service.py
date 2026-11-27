@@ -19,7 +19,7 @@ from dataclasses import asdict
 from datetime import date
 from typing import Any, Callable
 
-from .comps import find_shopping
+from .comps import find_shopping, select_shopping
 from .pricing import price_from_comps
 
 WIDE_SPREAD = 2.5  # highest kept listing over lowest; past this the line is flagged
@@ -33,6 +33,15 @@ class PriceInputError(ValueError):
 def _model_words(brand_model: str) -> list[str]:
     """Words of the spoken brand/model that carry a digit: the model number itself."""
     return [w.lower() for w in re.findall(r"[A-Za-z0-9-]+", brand_model) if any(ch.isdigit() for ch in w)]
+
+
+def loose_words(brand_model: str) -> list[str]:
+    """When no listing title names the model, the brand words and the model's leading digits
+    (75 in 75S451: the screen size) are the looser match. Each counted listing is flagged."""
+    words = re.findall(r"[A-Za-z0-9-]+", brand_model)
+    brand = [w.lower() for w in words if not any(ch.isdigit() for ch in w) and len(w) > 1]
+    digits = [m.group(0) for w in words if (m := re.search(r"\d{2,}", w))]
+    return brand + digits[:1]
 
 
 def query_for(description: str, brand_model: str) -> tuple[str, list[str], str]:
@@ -72,14 +81,35 @@ def price_lines(payload: dict, get_json: Callable[[dict], dict], today: date | N
         q, must, note = query_for(desc, bm)
         entry: dict[str, Any] = {"line_id": line_id, "description": desc, "brand_model": bm, "query": q,
                                  "search_note": note}
+        answers: list[dict] = []
+
+        def fetch(params: dict) -> dict:
+            answers.append(get_json(params))
+            return answers[-1]
+
         try:
-            res = find_shopping(line_id, q, get_json, currency, region, must=must, today=today)
+            res = find_shopping(line_id, q, fetch, currency, region, must=must, today=today)
         except Exception as e:  # one failed search never sinks the others
             entry.update(error=str(e), replacement_cost=None, basis="", kept=[], set_aside=[],
                          flags=["search failed; no price"], answer_sha256=None)
             out.append(entry)
             continue
+        loose_flag = ""
+        if must and not res.kept and answers:
+            # Stores often leave the model number out of the title. Choose again from the same
+            # answer (no second search) on brand and leading digits, and say so on the line.
+            loose = loose_words(bm)
+            if loose and loose != must:
+                again = select_shopping(answers[-1], line_id, q, currency, region, must=loose, today=today,
+                                        search_note=note)
+                if again.kept:
+                    again.answer_sha256 = res.answer_sha256
+                    res = again
+                    loose_flag = (f"no listing title names the model {bm}; counted listings match "
+                                  f"{' and '.join(loose)} only; confirm the model before relying on this price")
         pr = price_from_comps(res.kept, currency, region)
+        if loose_flag:
+            pr.flags.append(loose_flag)
         prices = [c.price for c in pr.sources]
         if len(prices) >= 2 and min(prices) > 0 and max(prices) / min(prices) > WIDE_SPREAD:
             # Listings this far apart are not the same kind of thing: a number would hide that.
